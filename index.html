@@ -112,6 +112,7 @@
   .del:hover { background: var(--danger); color: #fff; border-color: transparent; }
   .snd-bar { position: absolute; left: 4px; right: 4px; bottom: 4px; z-index: 1; display: flex; gap: 3px; justify-content: flex-end; }
   .snd-bar button { padding: 0 6px; font-size: 11.5px; line-height: 18px; border-radius: 5px; background: rgba(0,0,0,.72); border-color: transparent; }
+  .snd-bar button.on { background: var(--accent); color: #fff; }
   li.recording { animation: recpulse 1s ease-in-out infinite; }
   @keyframes recpulse { 0%, 100% { outline-color: rgba(255,92,92,.35); } 50% { outline-color: #ff5c5c; } }
   .empty-hint { color: var(--muted); font-size: 13px; text-align: center; margin-top: 24px; padding: 0 8px; line-height: 1.5; }
@@ -158,10 +159,9 @@
             <input type="range" id="fps" min="1" max="24" step="1" />
             <span class="fps-val" id="fps-val"></span>
           </div>
-          <label class="ghost-label" title="During playback, keep showing each frame until its attached sound has finished playing">
-            <input type="checkbox" id="hold-sound-toggle" /> Hold for sounds
+          <label class="ghost-label" title="When on, playback wraps back to the first frame; when off, it stops after the last frame">
+            <input type="checkbox" id="loop-toggle" checked /> Loop
           </label>
-          <button id="export-btn">&#11015; Export WebM</button>
         </div>
         <div id="status"></div>
       </div>
@@ -175,7 +175,7 @@
     </div>
     <ol id="frame-list"></ol>
     <div class="panel-foot">
-      <p class="hint">Click a frame to show it · new captures land right after the selected one (blue outline) · drag to reorder · 🎙 records sound on that frame · "Hold for sounds" keeps each frame up until its sound ends.</p>
+      <p class="hint">Click a frame to show it · new captures land right after the selected one (blue outline) · drag to reorder · 🎙 records sound on that frame · toggle "Hold" on a frame to keep it up until its sound ends.</p>
       <button id="clear-btn" title="Delete all frames">Clear</button>
     </div>
   </aside>
@@ -324,7 +324,7 @@ const KEY_FRAMES = 'stopmotion.frames.v1';
 const KEY_SETTINGS = 'stopmotion.settings.v1';
 
 let frames = [];            // [{id, url}] in playback order
-let settings = { fps: 8, ghost: true, holdForSound: false };
+let settings = { fps: 8, ghost: true, loop: true };
 let stream = null;
 let playing = false;
 let playIndex = 0;
@@ -338,9 +338,9 @@ let cursorId = null;           // selected frame id — new captures insert righ
 
 const stage = $('#stage'), video = $('#camera'), ghostImg = $('#ghost'), canvas = $('#playback');
 const list = $('#frame-list'), statusEl = $('#status');
-const captureBtn = $('#capture-btn'), playBtn = $('#play-btn'), exportBtn = $('#export-btn');
+const captureBtn = $('#capture-btn'), playBtn = $('#play-btn');
 const fpsSlider = $('#fps'), fpsVal = $('#fps-val'), ghostToggle = $('#ghost-toggle');
-const holdToggle = $('#hold-sound-toggle');
+const loopToggle = $('#loop-toggle');
 
 /* ---------- helpers ---------- */
 function uid() {
@@ -480,6 +480,11 @@ function renderFrames() {
         bar.appendChild(makeSndBtn('stop-rec', '\u25a0 Stop'));
       } else {
         if (f.sound) bar.appendChild(makeSndBtn('preview', '\u25b6', 'Preview sound'));
+        if (f.sound) {
+          const hb = makeSndBtn('hold', 'Hold', f.hold ? 'On: this frame stays on screen until its sound ends' : 'Keep this frame on screen until its sound ends');
+          if (f.hold) hb.classList.add('on');
+          bar.appendChild(hb);
+        }
         bar.appendChild(makeSndBtn('rec', '\ud83c\udfa7', f.sound ? 'Re-record sound (replaces current)' : 'Record a sound for this frame'));
         if (f.sound) bar.appendChild(makeSndBtn('rm-snd', '\u2715\u266a', 'Remove sound'));
       }
@@ -531,6 +536,7 @@ list.addEventListener('click', e => {
     else if (act === 'stop-rec') stopRecording();
     else if (act === 'preview') previewSound(id);
     else if (act === 'rm-snd') removeSound(id);
+    else if (act === 'hold') toggleHold(id);
     return;
   }
   const del = e.target.closest('.del');
@@ -591,9 +597,8 @@ fpsSlider.addEventListener('input', () => {
   fpsVal.textContent = settings.fps;
   persist();
 });
-holdToggle.addEventListener('change', () => {
-  settings.holdForSound = holdToggle.checked;
-  if (!settings.holdForSound) clearSoundHold();   // resume right away if we were mid-hold
+loopToggle.addEventListener('change', () => {
+  settings.loop = loopToggle.checked;
   persist();
 });
 
@@ -614,7 +619,7 @@ loadState();
 fpsSlider.value = settings.fps;
 fpsVal.textContent = settings.fps;
 ghostToggle.checked = settings.ghost;
-holdToggle.checked = !!settings.holdForSound;
+loopToggle.checked = settings.loop !== false;
 renderFrames(); updateGhost(); startCamera();
 
 /* ---------- per-frame sound ---------- */
@@ -649,7 +654,7 @@ function playFrameSound(i) {
   const f = frames[i];
   if (!f || !f.sound) return;
   const el = spawnSound(f.sound);
-  if (settings.holdForSound && playing) {   // only gate auto-playback, not manual stepping/previews
+  if (f.hold && playing) {   // per-sound hold; only gates auto-playback, not manual stepping/previews
     soundHold = el;
     acc = 0; lastT = performance.now();     // don't bank frame time while holding
     const release = () => { if (soundHold === el) clearSoundHold(); };
@@ -668,6 +673,14 @@ function removeSound(frameId) {
   const f = frames.find(x => x.id === frameId);
   if (!f) return;
   delete f.sound;
+  delete f.hold;
+  persist(); renderFrames();
+}
+function toggleHold(frameId) {
+  const f = frames.find(x => x.id === frameId);
+  if (!f || !f.sound) return;
+  f.hold = !f.hold;
+  if (!f.hold) clearSoundHold();   // release an active hold right away
   persist(); renderFrames();
 }
 async function startRecording(frameId) {
@@ -750,9 +763,10 @@ function buildProjectZip() {
       ref.sound = { path: 'sounds/' + n + '.' + extForMime(snd.mime), mime: snd.mime };
       entries.push({ name: ref.sound.path, data: b64ToBytes(snd.b64) });
     }
+    if (f.hold) ref.hold = true;
     return ref;
   });
-  const project = { format: 'stopmotion-project', version: 1, settings: { fps: settings.fps, ghost: !!settings.ghost, holdForSound: !!settings.holdForSound }, frames: frameRefs };
+  const project = { format: 'stopmotion-project', version: 1, settings: { fps: settings.fps, ghost: !!settings.ghost, loop: !!settings.loop }, frames: frameRefs };
   entries.push({ name: 'project.json', data: new TextEncoder().encode(JSON.stringify(project, null, 2)) });
   return ZipCodec.writeZip(entries);
 }
@@ -792,6 +806,7 @@ async function loadProjectFile(file) {
         if (!files[ref.sound.path]) throw new Error('Missing sound file "' + ref.sound.path + '" in the archive.');
         f.sound = 'data:' + (ref.sound.mime || 'audio/webm') + ';base64,' + bytesToB64(files[ref.sound.path]);
       }
+      if (ref.hold) f.hold = true;
       newFrames.push(f);
     }
     if (frames.length && !confirm('Replace the current ' + frames.length + ' frame(s) with "' + file.name + '" (' + newFrames.length + ' frame(s))?')) return;
@@ -803,13 +818,13 @@ async function loadProjectFile(file) {
     if (project.settings && typeof project.settings === 'object') {
       settings.fps = Math.min(24, Math.max(1, +project.settings.fps || 8));
       settings.ghost = !!project.settings.ghost;
-      settings.holdForSound = !!project.settings.holdForSound;
+      settings.loop = project.settings.loop !== false;   // older projects default to looping
     }
     cursorId = frames.length ? frames[0].id : null;
     fpsSlider.value = settings.fps;
     fpsVal.textContent = settings.fps;
     ghostToggle.checked = settings.ghost;
-    holdToggle.checked = !!settings.holdForSound;
+    loopToggle.checked = settings.loop !== false;
     persist(); renderFrames(); updateGhost();
     stage.dataset.mode = 'camera'; setPlayButtons();
     setStatus('Loaded "' + file.name + '": ' + frames.length + ' frame(s) at ' + settings.fps + ' fps.');
@@ -847,7 +862,6 @@ function drawFrame(i) {
 function setPlayButtons() {
   playBtn.innerHTML = playing ? '&#9208; Pause' : '&#9654; Play';
   captureBtn.disabled = playing || !video.videoWidth;
-  exportBtn.disabled = playing;
 }
 async function togglePlay() {
   if (playing) { pause(); return; }
@@ -869,9 +883,22 @@ function tick(now) {
   acc += now - lastT; lastT = now;
   const stepMs = 1000 / settings.fps;
   const prevIdx = playIndex;
-  while (acc >= stepMs) { acc -= stepMs; playIndex = (playIndex + 1) % frames.length; }
+  while (acc >= stepMs) {
+    acc -= stepMs;
+    if (playIndex < frames.length - 1) playIndex++;
+    else if (!settings.loop) { finishAtEnd(); return; }   // play-once: stop after the last frame
+    else playIndex = 0;                                    // loop: wrap back to the first
+  }
   drawFrame(playIndex);
   if (playIndex !== prevIdx) playFrameSound(playIndex);
+}
+function finishAtEnd() {
+  playing = false;
+  if (rafId) cancelAnimationFrame(rafId);
+  rafId = null;
+  stopAllSounds();
+  setPlayButtons();
+  setStatus('Reached the end of the reel — press Play to start over.');
 }
 function pause() {
   backToCamera();
@@ -888,55 +915,10 @@ async function step(dir) {
   playFrameSound(playIndex);
 }
 
-/* ---------- export to WebM ---------- */
-async function exportVideo() {
-  if (!frames.length) return setStatus('No frames to export.', true);
-  if (typeof MediaRecorder === 'undefined') return setStatus('MediaRecorder is not supported in this browser — try Chrome or Firefox.', true);
-  stopAllSounds();
-  let imgs;
-  try { imgs = await ensureLoaded(); } catch (e) { return setStatus('Could not load frames for export.', true); }
-  canvas.width = imgs[0].naturalWidth;
-  canvas.height = imgs[0].naturalHeight;
-  const srcStream = canvas.captureStream(settings.fps);
-  let mime = 'video/webm;codecs=vp9';
-  if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm';
-  const rec = new MediaRecorder(srcStream, { mimeType: mime, videoBitsPerSecond: 8000000 });
-  const chunks = [];
-  rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
-  const stopped = new Promise(res => { rec.onstop = res; });
-
-  captureBtn.disabled = true; playBtn.disabled = true; exportBtn.disabled = true;
-  setStatus('Recording preview at ' + settings.fps + ' fps…');
-  rec.start();
-  await new Promise(resolve => {
-    let i = 0, last = performance.now(), a = 0;
-    const stepMs = 1000 / settings.fps;
-    canvas.getContext('2d').drawImage(imgs[0], 0, 0);
-    function frame(now) {
-      a += now - last; last = now;
-      while (a >= stepMs) { a -= stepMs; i++; }
-      if (i >= frames.length) return resolve();
-      canvas.getContext('2d').drawImage(imgs[i], 0, 0);
-      requestAnimationFrame(frame);
-    }
-    requestAnimationFrame(frame);
-  });
-  rec.stop(); await stopped;
-  const blob = new Blob(chunks, { type: 'video/webm' });
-  const aEl = document.createElement('a');
-  aEl.href = URL.createObjectURL(blob);
-  aEl.download = 'stopmotion.webm';
-  aEl.click();
-  setTimeout(() => URL.revokeObjectURL(aEl.href), 5000);
-  captureBtn.disabled = !video.videoWidth; playBtn.disabled = false; exportBtn.disabled = false;
-  setStatus('Exported stopmotion.webm (' + formatBytes(blob.size) + ').');
-}
-
 playBtn.addEventListener('click', togglePlay);
 $('#cam-btn').addEventListener('click', backToCamera);
 $('#step-back').addEventListener('click', () => step(-1));
 $('#step-fwd').addEventListener('click', () => step(1));
-exportBtn.addEventListener('click', exportVideo);
 })();
 </script>
 </body>
