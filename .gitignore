@@ -1,0 +1,10 @@
+# Local tooling / agent config
+.qwen/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Editor dirs
+.vscode/
+.idea/

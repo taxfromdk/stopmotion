@@ -31,6 +31,7 @@
     padding: 10px 16px; border-bottom: 1px solid #2e3440;
   }
   header h1 { font-size: 18px; margin: 0; letter-spacing: .3px; }
+  .header-right { display: flex; align-items: center; gap: 10px; }
   main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 
   /* ---- stage (full-bleed) ---- */
@@ -121,9 +122,14 @@
 </style>
 </head>
 <body>
+<input type="file" id="project-file" accept=".zip,application/zip,application/x-zip-compressed" hidden />
 <header>
   <h1>&#127916; Stop Motion Studio</h1>
-  <span id="storage-info" style="color:var(--muted);font-size:13px;"></span>
+  <div class="header-right">
+    <span id="storage-info" style="color:var(--muted);font-size:13px;"></span>
+    <button id="save-project-btn" title="Download the whole project (structure + images + sounds) as a .zip file">&#128190; Save project</button>
+    <button id="load-project-btn" title="Open a previously saved .zip project file">&#128194; Load project&#8230;</button>
+  </div>
 </header>
 <main>
   <section id="stage-panel">
@@ -152,6 +158,9 @@
             <input type="range" id="fps" min="1" max="24" step="1" />
             <span class="fps-val" id="fps-val"></span>
           </div>
+          <label class="ghost-label" title="During playback, keep showing each frame until its attached sound has finished playing">
+            <input type="checkbox" id="hold-sound-toggle" /> Hold for sounds
+          </label>
           <button id="export-btn">&#11015; Export WebM</button>
         </div>
         <div id="status"></div>
@@ -166,11 +175,147 @@
     </div>
     <ol id="frame-list"></ol>
     <div class="panel-foot">
-      <p class="hint">Click a frame to show it · new captures land right after the selected one (blue outline) · drag to reorder · 🎙 records sound on that frame.</p>
+      <p class="hint">Click a frame to show it · new captures land right after the selected one (blue outline) · drag to reorder · 🎙 records sound on that frame · "Hold for sounds" keeps each frame up until its sound ends.</p>
       <button id="clear-btn" title="Delete all frames">Clear</button>
     </div>
   </aside>
 </main>
+<script id="zip-codec">
+/* Minimal ZIP archive codec — store method only, zero dependencies.
+   Runs entirely in the browser; images/sounds are already compressed
+   formats so no deflate is needed. The reader accepts stored entries from
+   any tool and reports a clear error on compressed ones. */
+(function (g) {
+'use strict';
+
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n >>> 0;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+
+function crc32(bytes) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+function dosDateTime(d) {
+  d = d || new Date();
+  const year = Math.max(1980, d.getFullYear());
+  return {
+    time: (d.getHours() << 11) | (d.getMinutes() << 5) | Math.floor(d.getSeconds() / 2),
+    date: (((year - 1980) & 0x7F) << 9) | ((d.getMonth() + 1) << 5) | d.getDate()
+  };
+}
+
+function concat(parts) {
+  let total = 0;
+  for (const p of parts) total += p.length;
+  const out = new Uint8Array(total);
+  let o = 0;
+  for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
+}
+
+/* entries: [{name: string, data: Uint8Array}] -> Uint8Array zip */
+function writeZip(entries) {
+  const enc = new TextEncoder();
+  const ts = dosDateTime();
+  const parts = [];
+  const central = [];
+  let offset = 0;
+  for (const e of entries) {
+    if (!(e.data instanceof Uint8Array)) throw new Error('entry "' + e.name + '": data must be a Uint8Array');
+    const nameBytes = enc.encode(e.name);
+    const crc = crc32(e.data);
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true);   // local file header signature
+    lh.setUint16(4, 20, true);           // version needed to extract
+    lh.setUint16(8, 0, true);            // compression: store
+    lh.setUint16(10, ts.time, true);
+    lh.setUint16(12, ts.date, true);
+    lh.setUint32(14, crc, true);
+    lh.setUint32(18, e.data.length, true);
+    lh.setUint32(22, e.data.length, true);
+    lh.setUint16(26, nameBytes.length, true);
+    parts.push(new Uint8Array(lh.buffer), nameBytes, e.data);
+    central.push({ nameBytes: nameBytes, crc: crc, size: e.data.length, offset: offset });
+    offset += 30 + nameBytes.length + e.data.length;
+  }
+  const cdStart = offset;
+  for (const c of central) {
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0, 0x02014b50, true);   // central directory signature
+    ch.setUint16(4, 20, true);           // version made by
+    ch.setUint16(6, 20, true);           // version needed to extract
+    ch.setUint16(8, 0, true);            // flags
+    ch.setUint16(10, 0, true);           // compression: store
+    ch.setUint16(12, ts.time, true);
+    ch.setUint16(14, ts.date, true);
+    ch.setUint32(16, c.crc, true);
+    ch.setUint32(20, c.size, true);      // compressed size (== stored)
+    ch.setUint32(24, c.size, true);      // uncompressed size
+    ch.setUint16(28, c.nameBytes.length, true);
+    ch.setUint16(34, 0, true);           // disk number start
+    ch.setUint32(38, 0, true);           // external attributes
+    ch.setUint32(42, c.offset, true);    // local header offset
+    parts.push(new Uint8Array(ch.buffer), c.nameBytes);
+    offset += 46 + c.nameBytes.length;
+  }
+  const cdSize = offset - cdStart;
+  const eocd = new DataView(new ArrayBuffer(22));
+  eocd.setUint32(0, 0x06054b50, true);   // end of central directory signature
+  eocd.setUint16(8, central.length, true);
+  eocd.setUint16(10, central.length, true);
+  eocd.setUint32(12, cdSize, true);
+  eocd.setUint32(16, cdStart, true);
+  parts.push(new Uint8Array(eocd.buffer));
+  return concat(parts);
+}
+
+/* ArrayBuffer | Uint8Array -> { [name]: Uint8Array } */
+function readZip(buf) {
+  const bytes = (buf instanceof Uint8Array) ? buf : new Uint8Array(buf);
+  if (bytes.length < 22) throw new Error('Not a ZIP file (too small).');
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let eocd = -1;
+  const minPos = Math.max(0, bytes.length - 22 - 65535); // allow up to a 64k comment
+  for (let i = bytes.length - 22; i >= minPos; i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error('Not a ZIP file (end-of-directory record not found).');
+  const count = dv.getUint16(eocd + 10, true);
+  let p = dv.getUint32(eocd + 16, true);
+  const files = {};
+  for (let n = 0; n < count; n++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) throw new Error('Corrupt ZIP: bad central directory entry.');
+    const method = dv.getUint16(p + 10, true);
+    const uncompSize = dv.getUint32(p + 24, true);
+    const nameLen = dv.getUint16(p + 28, true);
+    const extraLen = dv.getUint16(p + 30, true);
+    const commentLen = dv.getUint16(p + 32, true);
+    const localOffset = dv.getUint32(p + 42, true);
+    const name = new TextDecoder().decode(bytes.subarray(p + 46, p + 46 + nameLen));
+    if (method !== 0) throw new Error('Entry "' + name + '" is compressed; only stored (uncompressed) ZIP entries are supported.');
+    if (dv.getUint32(localOffset, true) !== 0x04034b50) throw new Error('Corrupt ZIP: bad local header for "' + name + '".');
+    const lNameLen = dv.getUint16(localOffset + 26, true);
+    const lExtraLen = dv.getUint16(localOffset + 28, true);
+    const dataStart = localOffset + 30 + lNameLen + lExtraLen;
+    if (dataStart + uncompSize > bytes.length) throw new Error('Corrupt ZIP: truncated entry "' + name + '".');
+    files[name] = bytes.slice(dataStart, dataStart + uncompSize);
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  return files;
+}
+
+g.ZipCodec = { writeZip: writeZip, readZip: readZip };
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
 <script>
 (() => {
 'use strict';
@@ -179,7 +324,7 @@ const KEY_FRAMES = 'stopmotion.frames.v1';
 const KEY_SETTINGS = 'stopmotion.settings.v1';
 
 let frames = [];            // [{id, url}] in playback order
-let settings = { fps: 8, ghost: true };
+let settings = { fps: 8, ghost: true, holdForSound: false };
 let stream = null;
 let playing = false;
 let playIndex = 0;
@@ -188,12 +333,14 @@ let rafId = null, lastT = 0, acc = 0;
 let dragId = null;
 let recording = null;          // {frameId, rec, auto} while a frame sound is being recorded
 const activeAudios = [];       // spawned players currently sounding (overlaps allowed)
+let soundHold = null;          // audio element holding playback in "hold for sounds" mode
 let cursorId = null;           // selected frame id — new captures insert right after it
 
 const stage = $('#stage'), video = $('#camera'), ghostImg = $('#ghost'), canvas = $('#playback');
 const list = $('#frame-list'), statusEl = $('#status');
 const captureBtn = $('#capture-btn'), playBtn = $('#play-btn'), exportBtn = $('#export-btn');
 const fpsSlider = $('#fps'), fpsVal = $('#fps-val'), ghostToggle = $('#ghost-toggle');
+const holdToggle = $('#hold-sound-toggle');
 
 /* ---------- helpers ---------- */
 function uid() {
@@ -444,6 +591,11 @@ fpsSlider.addEventListener('input', () => {
   fpsVal.textContent = settings.fps;
   persist();
 });
+holdToggle.addEventListener('change', () => {
+  settings.holdForSound = holdToggle.checked;
+  if (!settings.holdForSound) clearSoundHold();   // resume right away if we were mid-hold
+  persist();
+});
 
 $('#clear-btn').addEventListener('click', () => {
   if (!frames.length) return;
@@ -462,6 +614,7 @@ loadState();
 fpsSlider.value = settings.fps;
 fpsVal.textContent = settings.fps;
 ghostToggle.checked = settings.ghost;
+holdToggle.checked = !!settings.holdForSound;
 renderFrames(); updateGhost(); startCamera();
 
 /* ---------- per-frame sound ---------- */
@@ -481,14 +634,30 @@ function spawnSound(src) {
   });
   const p = el.play();
   if (p && p.catch) p.catch(() => {});
+  return el;
 }
 function stopAllSounds() {
+  clearSoundHold();
   while (activeAudios.length) activeAudios.pop().pause();
+}
+function clearSoundHold() {
+  if (!soundHold) return;
+  soundHold = null;
+  acc = 0; lastT = performance.now();   // resume from a clean slate — no banked frame time
 }
 function playFrameSound(i) {
   const f = frames[i];
   if (!f || !f.sound) return;
-  spawnSound(f.sound);
+  const el = spawnSound(f.sound);
+  if (settings.holdForSound && playing) {   // only gate auto-playback, not manual stepping/previews
+    soundHold = el;
+    acc = 0; lastT = performance.now();     // don't bank frame time while holding
+    const release = () => { if (soundHold === el) clearSoundHold(); };
+    el.addEventListener('ended', release, { once: true });
+    el.addEventListener('error', release, { once: true });
+    const p = el.play();                    // no-op if already playing; catches an autoplay rejection so we never hold forever
+    if (p && p.catch) p.catch(release);
+  }
 }
 function previewSound(frameId) {
   const f = frames.find(x => x.id === frameId);
@@ -541,6 +710,124 @@ function stopRecording() {
   try { r.rec.stop(); } catch (err) { /* already stopped */ }
 }
 
+/* ---------- save / load project (.zip) ---------- */
+const MIME_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'audio/webm': 'webm', 'audio/mp4': 'mp4', 'audio/ogg': 'ogg', 'audio/mpeg': 'mp3', 'audio/wav': 'wav' };
+
+function parseDataUrl(u) {
+  if (typeof u !== 'string' || !u.startsWith('data:')) throw new Error('not a data URL');
+  const i = u.indexOf('base64,');
+  if (i === -1) throw new Error('expected a base64 data URL');
+  let mime = u.slice(5, i);
+  const semi = mime.lastIndexOf(';');
+  if (semi !== -1) mime = mime.slice(0, semi);
+  return { mime: mime || 'application/octet-stream', b64: u.slice(i + 7) };
+}
+function b64ToBytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function bytesToB64(bytes) {
+  let bin = '';
+  const CH = 0x8000;
+  for (let i = 0; i < bytes.length; i += CH) bin += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + CH, bytes.length)));
+  return btoa(bin);
+}
+function extForMime(mime) { return MIME_EXT[String(mime).split(';')[0]] || 'bin'; } // strip codec params, e.g. audio/webm;codecs=opus
+
+/* Build the archive: project.json (structure) + frames/*.jpg + sounds/* */
+function buildProjectZip() {
+  const entries = [];
+  const frameRefs = frames.map((f, i) => {
+    const n = String(i + 1).padStart(3, '0');
+    const img = parseDataUrl(f.url);
+    const imagePath = 'frames/' + n + '.' + extForMime(img.mime);
+    entries.push({ name: imagePath, data: b64ToBytes(img.b64) });
+    const ref = { id: f.id, image: imagePath, mime: img.mime };
+    if (f.sound) {
+      const snd = parseDataUrl(f.sound);
+      ref.sound = { path: 'sounds/' + n + '.' + extForMime(snd.mime), mime: snd.mime };
+      entries.push({ name: ref.sound.path, data: b64ToBytes(snd.b64) });
+    }
+    return ref;
+  });
+  const project = { format: 'stopmotion-project', version: 1, settings: { fps: settings.fps, ghost: !!settings.ghost, holdForSound: !!settings.holdForSound }, frames: frameRefs };
+  entries.push({ name: 'project.json', data: new TextEncoder().encode(JSON.stringify(project, null, 2)) });
+  return ZipCodec.writeZip(entries);
+}
+
+function downloadBlob(blob, filename) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+function saveProject() {
+  try {
+    setStatus('Saving project…');
+    const bytes = buildProjectZip();
+    downloadBlob(new Blob([bytes], { type: 'application/zip' }), 'stopmotion-project.zip');
+    setStatus('Saved stopmotion-project.zip (' + formatBytes(bytes.length) + ', ' + frames.length + ' frame(s)).');
+  } catch (err) {
+    console.error(err);
+    setStatus('Could not save project: ' + err.message, true);
+  }
+}
+
+async function loadProjectFile(file) {
+  try {
+    const files = ZipCodec.readZip(await file.arrayBuffer());
+    if (!files['project.json']) throw new Error('No project.json found — is this a saved Stop Motion Studio project?');
+    const project = JSON.parse(new TextDecoder().decode(files['project.json']));
+    if (project.format !== 'stopmotion-project' || !Array.isArray(project.frames)) throw new Error('Unrecognized project file.');
+    if (typeof project.version === 'number' && project.version > 1) throw new Error('Project version ' + project.version + ' is newer than this app supports.');
+    const newFrames = [];
+    for (const ref of project.frames) {
+      if (!ref || typeof ref.image !== 'string' || !files[ref.image]) throw new Error('Missing image file "' + ((ref && ref.image) || '?') + '" in the archive.');
+      let f = { id: uid(), url: 'data:' + (ref.mime || 'image/jpeg') + ';base64,' + bytesToB64(files[ref.image]) };
+      if (ref.sound) {
+        if (!files[ref.sound.path]) throw new Error('Missing sound file "' + ref.sound.path + '" in the archive.');
+        f.sound = 'data:' + (ref.sound.mime || 'audio/webm') + ';base64,' + bytesToB64(files[ref.sound.path]);
+      }
+      newFrames.push(f);
+    }
+    if (frames.length && !confirm('Replace the current ' + frames.length + ' frame(s) with "' + file.name + '" (' + newFrames.length + ' frame(s))?')) return;
+    if (recording) stopRecording();
+    playing = false;
+    if (rafId) cancelAnimationFrame(rafId);
+    stopAllSounds();
+    frames = newFrames;
+    if (project.settings && typeof project.settings === 'object') {
+      settings.fps = Math.min(24, Math.max(1, +project.settings.fps || 8));
+      settings.ghost = !!project.settings.ghost;
+      settings.holdForSound = !!project.settings.holdForSound;
+    }
+    cursorId = frames.length ? frames[0].id : null;
+    fpsSlider.value = settings.fps;
+    fpsVal.textContent = settings.fps;
+    ghostToggle.checked = settings.ghost;
+    holdToggle.checked = !!settings.holdForSound;
+    persist(); renderFrames(); updateGhost();
+    stage.dataset.mode = 'camera'; setPlayButtons();
+    setStatus('Loaded "' + file.name + '": ' + frames.length + ' frame(s) at ' + settings.fps + ' fps.');
+  } catch (err) {
+    console.error(err);
+    setStatus('Could not load project: ' + err.message, true);
+  } finally {
+    $('#project-file').value = '';
+  }
+}
+
+$('#save-project-btn').addEventListener('click', saveProject);
+$('#load-project-btn').addEventListener('click', () => $('#project-file').click());
+$('#project-file').addEventListener('change', () => {
+  const file = $('#project-file').files && $('#project-file').files[0];
+  if (file) loadProjectFile(file);
+});
+
 /* ---------- playback ---------- */
 async function ensureLoaded() {
   loadedImgs = await Promise.all(frames.map(f => new Promise((res, rej) => {
@@ -577,13 +864,14 @@ async function togglePlay() {
 }
 function tick(now) {
   if (!playing) return;
+  rafId = requestAnimationFrame(tick);
+  if (soundHold && !soundHold.ended) return;   // hold this frame until its sound finishes
   acc += now - lastT; lastT = now;
   const stepMs = 1000 / settings.fps;
   const prevIdx = playIndex;
   while (acc >= stepMs) { acc -= stepMs; playIndex = (playIndex + 1) % frames.length; }
   drawFrame(playIndex);
   if (playIndex !== prevIdx) playFrameSound(playIndex);
-  rafId = requestAnimationFrame(tick);
 }
 function pause() {
   backToCamera();
