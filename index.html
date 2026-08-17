@@ -128,6 +128,7 @@
   <h1>&#127916; Stop Motion Studio</h1>
   <div class="header-right">
     <span id="storage-info" style="color:var(--muted);font-size:13px;"></span>
+    <span id="app-version" title="App version" style="color:var(--muted);font-size:12.5px;font-variant-numeric:tabular-nums;"></span>
     <button id="save-project-btn" title="Download the whole project (structure + images + sounds) as a .zip file">&#128190; Save project</button>
     <button id="load-project-btn" title="Open a previously saved .zip project file">&#128194; Load project&#8230;</button>
   </div>
@@ -320,6 +321,7 @@ g.ZipCodec = { writeZip: writeZip, readZip: readZip };
 (() => {
 'use strict';
 const $ = s => document.querySelector(s);
+const APP_VERSION = '1.0';
 const KEY_FRAMES = 'stopmotion.frames.v1';
 const KEY_SETTINGS = 'stopmotion.settings.v1';
 
@@ -620,6 +622,7 @@ fpsSlider.value = settings.fps;
 fpsVal.textContent = settings.fps;
 ghostToggle.checked = settings.ghost;
 loopToggle.checked = settings.loop !== false;
+$('#app-version').textContent = 'v' + APP_VERSION;
 renderFrames(); updateGhost(); startCamera();
 
 /* ---------- per-frame sound ---------- */
