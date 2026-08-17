@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark" />
+<title>Stop Motion Studio</title>
+<style>
+  :root {
+    --bg: #16191f;
+    --panel: #20242d;
+    --panel-2: #2a303c;
+    --text: #e8ebf0;
+    --muted: #9aa3b2;
+    --accent: #5b8cff;
+    --danger: #ff5c5c;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 16px; border-bottom: 1px solid #2e3440;
+  }
+  header h1 { font-size: 18px; margin: 0; letter-spacing: .3px; }
+  main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+  /* ---- stage (full-bleed) ---- */
+  #stage-panel { flex: 1; min-width: 0; min-height: 0; display: flex; }
+  #stage {
+    position: relative;
+    width: 100%; flex: 1; min-height: 260px;
+    background: #000; overflow: hidden;
+  }
+  #stage video, #ghost, #playback {
+    position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+  }
+  #playback { z-index: 1; }
+  #ghost { opacity: .5; pointer-events: none; display: none; z-index: 2; }
+  #playback { display: none; background: #000; }
+  #stage[data-mode="play"] video, #stage[data-mode="play"] #ghost { visibility: hidden; }
+  #stage[data-mode="play"] #playback { display: block; }
+  #flash {
+    position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 5;
+  }
+  #ctrl-box {
+    position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 4;
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    max-width: calc(100% - 24px); padding: 8px 14px;
+    background: rgba(8, 10, 14, .6); border: 1px solid rgba(255,255,255,.09); border-radius: 14px;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  }
+  #ctrl-box .group { background: transparent; padding: 0; }
+  #flash.on { animation: flash .25s ease-out; }
+  @keyframes flash { from { opacity: .8; } to { opacity: 0; } }
+
+  /* ---- controls ---- */
+  .controls { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; justify-content: center; max-width: 900px; }
+  .group { display: flex; align-items: center; gap: 8px; background: var(--panel); padding: 6px 10px; border-radius: 10px; }
+  button {
+    font: inherit; color: var(--text); background: var(--panel-2);
+    border: 1px solid #394152; border-radius: 8px; padding: 7px 12px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  #capture-btn { background: #c0392b; border-color: #e74c3c; font-weight: 600; padding: 8px 18px; }
+  #capture-btn:hover:not(:disabled) { background: #d64535; }
+  label.ghost-label { display: flex; align-items: center; gap: 7px; cursor: pointer; user-select: none; font-size: 14px; color: var(--muted); }
+  input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; }
+  input[type="range"] { accent-color: var(--accent); width: 110px; }
+  .fps-val { min-width: 42px; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+  #status { min-height: 20px; font-size: 13.5px; color: var(--muted); text-align: center; max-width: 860px; }
+  #status.error { color: var(--danger); }
+
+  /* ---- reel (bottom strip) ---- */
+  #frames-panel {
+    width: 100%; flex-shrink: 0; background: var(--panel);
+    border-top: 1px solid #2e3440; display: flex; flex-direction: column; min-height: 0; max-height: 250px;
+  }
+  .panel-head { padding: 12px 14px 8px; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .panel-head h2 { margin: 0; font-size: 15px; }
+  #frame-meta { color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #frame-list {
+    list-style: none; margin: 0; padding: 8px 12px; flex: 1; overflow-x: auto; overflow-y: hidden;
+    display: flex; flex-direction: row; align-items: center; gap: 8px; user-select: none; min-height: 60px;
+  }
+  #frame-list li {
+    position: relative; margin: 0; width: 132px; flex-shrink: 0; border-radius: 8px;
+    outline: 2px solid transparent; transition: outline-color .1s;
+  }
+  #frame-list li img { width: 100%; display: block; border-radius: 8px; pointer-events: none; }
+  #frame-list li.dragging { opacity: .45; outline-color: var(--accent); }
+  #frame-list li.selected { outline-color: var(--accent); }
+  .idx {
+    position: absolute; top: 6px; left: 6px; z-index: 1;
+    background: rgba(0,0,0,.72); border-radius: 6px; padding: 1px 8px; font-size: 12px;
+  }
+  .del {
+    position: absolute; top: 5px; right: 5px; z-index: 1;
+    width: 24px; height: 24px; padding: 0; line-height: 1; border-radius: 6px;
+    background: rgba(0,0,0,.72); color: #ffb3b3; font-size: 15px;
+  }
+  .del:hover { background: var(--danger); color: #fff; border-color: transparent; }
+  .snd-bar { position: absolute; left: 4px; right: 4px; bottom: 4px; z-index: 1; display: flex; gap: 3px; justify-content: flex-end; }
+  .snd-bar button { padding: 0 6px; font-size: 11.5px; line-height: 18px; border-radius: 5px; background: rgba(0,0,0,.72); border-color: transparent; }
+  li.recording { animation: recpulse 1s ease-in-out infinite; }
+  @keyframes recpulse { 0%, 100% { outline-color: rgba(255,92,92,.35); } 50% { outline-color: #ff5c5c; } }
+  .empty-hint { color: var(--muted); font-size: 13px; text-align: center; margin-top: 24px; padding: 0 8px; line-height: 1.5; }
+  .panel-foot { padding: 8px 14px 12px; border-top: 1px solid #2e3440; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .hint { color: var(--muted); font-size: 11.5px; line-height: 1.45; margin: 0; }
+  #clear-btn { color: #ffb3b3; border-color: #5a2b2b; padding: 5px 10px; font-size: 12.5px; }
+  #clear-btn:hover:not(:disabled) { background: var(--danger); color: #fff; border-color: transparent; }
+</style>
+</head>
+<body>
+<header>
+  <h1>&#127916; Stop Motion Studio</h1>
+  <span id="storage-info" style="color:var(--muted);font-size:13px;"></span>
+</header>
+<main>
+  <section id="stage-panel">
+    <div id="stage" data-mode="camera">
+      <video id="camera" autoplay playsinline muted></video>
+      <img id="ghost" alt="" draggable="false" />
+      <canvas id="playback"></canvas>
+      <div id="flash"></div>
+      <div id="ctrl-box">
+        <div class="controls">
+          <button id="capture-btn">&#128247; Capture frame</button>
+          <button id="retry-cam" title="Request camera access again">&#128247; Retry camera</button>
+          <label class="ghost-label" title="Overlay the last captured frame at 50% opacity so you can align objects between shots">
+            <input type="checkbox" id="ghost-toggle" /> Ghost previous (50%)
+          </label>
+        </div>
+        <div class="controls">
+          <div class="group">
+            <button id="play-btn">&#9654; Play</button>
+            <button id="step-back" title="Previous frame">&#9198;</button>
+            <button id="step-fwd" title="Next frame">&#9197;</button>
+            <button id="cam-btn" title="Back to live camera view">&#128247; Live</button>
+          </div>
+          <div class="group">
+            <span style="font-size:13px;color:var(--muted);">FPS</span>
+            <input type="range" id="fps" min="1" max="24" step="1" />
+            <span class="fps-val" id="fps-val"></span>
+          </div>
+          <button id="export-btn">&#11015; Export WebM</button>
+        </div>
+        <div id="status"></div>
+      </div>
+    </div>
+  </section>
+
+  <aside id="frames-panel">
+    <div class="panel-head">
+      <h2>Frames (<span id="frame-count">0</span>)</h2>
+      <span id="frame-meta"></span>
+    </div>
+    <ol id="frame-list"></ol>
+    <div class="panel-foot">
+      <p class="hint">Click a frame to show it · new captures land right after the selected one (blue outline) · drag to reorder · 🎙 records sound on that frame.</p>
+      <button id="clear-btn" title="Delete all frames">Clear</button>
+    </div>
+  </aside>
+</main>
+<script>
+(() => {
+'use strict';
+const $ = s => document.querySelector(s);
+const KEY_FRAMES = 'stopmotion.frames.v1';
+const KEY_SETTINGS = 'stopmotion.settings.v1';
+
+let frames = [];            // [{id, url}] in playback order
+let settings = { fps: 8, ghost: true };
+let stream = null;
+let playing = false;
+let playIndex = 0;
+let loadedImgs = [];        // HTMLImageElement[] aligned with frames
+let rafId = null, lastT = 0, acc = 0;
+let dragId = null;
+let recording = null;          // {frameId, rec, auto} while a frame sound is being recorded
+const activeAudios = [];       // spawned players currently sounding (overlaps allowed)
+let cursorId = null;           // selected frame id — new captures insert right after it
+
+const stage = $('#stage'), video = $('#camera'), ghostImg = $('#ghost'), canvas = $('#playback');
+const list = $('#frame-list'), statusEl = $('#status');
+const captureBtn = $('#capture-btn'), playBtn = $('#play-btn'), exportBtn = $('#export-btn');
+const fpsSlider = $('#fps'), fpsVal = $('#fps-val'), ghostToggle = $('#ghost-toggle');
+
+/* ---------- helpers ---------- */
+function uid() {
+  return (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
+}
+function formatBytes(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1048576).toFixed(2) + ' MB';
+}
+function setStatus(msg, isError = false) {
+  statusEl.textContent = msg;
+  statusEl.classList.toggle('error', !!isError);
+}
+
+/* ---------- persistence (localStorage) ---------- */
+function persist() {
+  try {
+    localStorage.setItem(KEY_FRAMES, JSON.stringify(frames));
+    localStorage.setItem(KEY_SETTINGS, JSON.stringify(settings));
+    updateStorageInfo();
+    return true;
+  } catch (e) {
+    setStatus('Could not save to local storage (quota exceeded?). Delete some frames or use a lower resolution.', true);
+    return false;
+  }
+}
+function loadState() {
+  try {
+    const f = JSON.parse(localStorage.getItem(KEY_FRAMES));
+    if (Array.isArray(f)) frames = f.filter(x => x && typeof x.url === 'string');
+    const s = JSON.parse(localStorage.getItem(KEY_SETTINGS));
+    if (s) settings = Object.assign(settings, s);
+  } catch (e) { /* first run */ }
+}
+function updateStorageInfo() {
+  try {
+    $('#storage-info').textContent = formatBytes(new Blob([localStorage.getItem(KEY_FRAMES) || '']).size) + ' in local storage';
+    const bytes = new Blob([JSON.stringify(frames)]).size;
+    $('#frame-meta').textContent = frames.length ? formatBytes(bytes) : '';
+  } catch (e) { /* ignore */ }
+}
+
+/* ---------- camera ---------- */
+async function startCamera() {
+  if (!window.isSecureContext) {
+    captureBtn.disabled = true;
+    setStatus('Camera blocked: this page is not in a secure context. Open it via http://localhost:8000 (not another IP or hostname), or serve over HTTPS.', true);
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    captureBtn.disabled = true;
+    setStatus('Camera blocked: this browser does not expose getUserMedia. Try Chrome, Edge, or Firefox with camera support enabled.', true);
+    return;
+  }
+  try {
+    const oldStream = stream;
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false
+    });
+    if (oldStream) oldStream.getTracks().forEach(t => t.stop());
+    video.srcObject = stream;
+    captureBtn.disabled = false;
+    setStatus('Camera ready. Press Capture to add a frame — the ghost overlay helps you align objects.');
+  } catch (err) {
+    captureBtn.disabled = true;
+    let msg = 'Camera unavailable (' + err.name + ').';
+    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+      msg = 'Camera permission was denied. Click the camera icon in the address bar, allow access for this site, then press "Retry camera".';
+    } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+      msg = 'No camera device was found on this machine.';
+    } else if (err.name === 'NotReadableError') {
+      msg = 'The camera is in use by another application. Close it, then press "Retry camera".';
+    }
+    setStatus(msg, true);
+  }
+}
+
+/* ---------- capture ---------- */
+function flash() {
+  const f = $('#flash');
+  f.classList.remove('on'); void f.offsetWidth; f.classList.add('on');
+}
+function showGhost(url) {
+  if (settings.ghost && url) {
+    if (ghostImg.src !== url) ghostImg.src = url;
+    ghostImg.style.display = 'block';
+  } else {
+    ghostImg.style.display = 'none';
+  }
+}
+function updateGhost() {           // camera mode: the frame before the next shot = last in reel
+  showGhost(frames.length ? frames[frames.length - 1].url : null);
+}
+function capture() {
+  if (!video.videoWidth || !video.videoHeight) return;
+  const maxEdge = 1280;
+  let w = video.videoWidth, h = video.videoHeight;
+  const s = Math.min(1, maxEdge / Math.max(w, h));
+  w = Math.round(w * s); h = Math.round(h * s);
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  c.getContext('2d').drawImage(video, 0, 0, w, h);
+  const f = { id: uid(), url: c.toDataURL('image/jpeg', 0.75) };
+  const ci = cursorId ? frames.findIndex(x => x.id === cursorId) : -1;
+  if (ci >= 0) frames.splice(ci + 1, 0, f); else frames.push(f);
+  cursorId = f.id;
+  persist(); renderFrames(); flash();
+  stage.dataset.mode = 'camera'; updateGhost();
+}
+
+/* ---------- frame list rendering + drag reorder ---------- */
+function renderFrames() {
+  list.innerHTML = '';
+  if (!frames.length) {
+    const li = document.createElement('li');
+    li.className = 'empty-hint';
+    li.textContent = 'No frames yet. Capture your first shot!';
+    li.style.outline = 'none';
+    list.appendChild(li);
+  } else {
+    frames.forEach((f, i) => {
+      const li = document.createElement('li');
+      li.draggable = true;
+      li.dataset.id = f.id;
+      const idx = document.createElement('span');
+      idx.className = 'idx'; idx.textContent = i + 1;
+      const img = document.createElement('img');
+      img.src = f.url; img.alt = 'Frame ' + (i + 1); img.draggable = false;
+      const del = document.createElement('button');
+      del.className = 'del'; del.title = 'Delete frame'; del.textContent = '\u00d7';
+      const bar = document.createElement('div');
+      bar.className = 'snd-bar';
+      if (recording && recording.frameId === f.id) {
+        li.classList.add('recording');
+        bar.appendChild(makeSndBtn('stop-rec', '\u25a0 Stop'));
+      } else {
+        if (f.sound) bar.appendChild(makeSndBtn('preview', '\u25b6', 'Preview sound'));
+        bar.appendChild(makeSndBtn('rec', '\ud83c\udfa7', f.sound ? 'Re-record sound (replaces current)' : 'Record a sound for this frame'));
+        if (f.sound) bar.appendChild(makeSndBtn('rm-snd', '\u2715\u266a', 'Remove sound'));
+      }
+      li.append(idx, img, del, bar);
+      list.appendChild(li);
+    });
+  }
+  $('#frame-count').textContent = frames.length;
+  markSelected();
+  updateStorageInfo();
+}
+
+/* ---------- frame selection / show on stage ---------- */
+function markSelected() {
+  for (const li of list.querySelectorAll('li[data-id]')) {
+    li.classList.toggle('selected', li.dataset.id === cursorId);
+  }
+}
+async function selectFrame(id) {
+  const i = frames.findIndex(f => f.id === id);
+  if (i < 0) return;
+  cursorId = id;
+  markSelected();
+  playing = false;
+  if (rafId) cancelAnimationFrame(rafId);
+  stopAllSounds();
+  try { await ensureLoaded(); } catch (err) { return; }
+  playIndex = i;
+  stage.dataset.mode = 'play';
+  showGhost(null);
+  drawFrame(i);
+}
+function backToCamera() {
+  playing = false;
+  if (rafId) cancelAnimationFrame(rafId);
+  stopAllSounds();
+  stage.dataset.mode = 'camera';
+  setPlayButtons(); updateGhost();
+}
+
+list.addEventListener('click', e => {
+  const actBtn = e.target.closest('button[data-act]');
+  if (actBtn) {
+    const li = actBtn.closest('li[data-id]');
+    if (!li) return;
+    const id = li.dataset.id;
+    const act = actBtn.dataset.act;
+    if (act === 'rec') startRecording(id);
+    else if (act === 'stop-rec') stopRecording();
+    else if (act === 'preview') previewSound(id);
+    else if (act === 'rm-snd') removeSound(id);
+    return;
+  }
+  const del = e.target.closest('.del');
+  if (del) {
+    const li2 = del.closest('li[data-id]');
+    if (!li2) return;
+    if (recording && recording.frameId === li2.dataset.id) stopRecording();
+    frames = frames.filter(f => f.id !== li2.dataset.id);
+    persist(); renderFrames(); updateGhost();
+    return;
+  }
+  const selLi = e.target.closest('li[data-id]');
+  if (selLi) selectFrame(selLi.dataset.id);
+});
+
+list.addEventListener('dragstart', e => {
+  const li = e.target.closest && e.target.closest('li[data-id]');
+  if (!li) return;
+  dragId = li.dataset.id;
+  li.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  try { e.dataTransfer.setData('text/plain', dragId); } catch (err) { /* ignore */ }
+});
+
+list.addEventListener('dragover', e => {
+  if (!dragId) return;
+  e.preventDefault();
+  const dragging = list.querySelector('.dragging');
+  if (!dragging) return;
+  let best = { offset: -Infinity, el: null };
+  for (const li of list.querySelectorAll('li[data-id]:not(.dragging)')) {
+    const box = li.getBoundingClientRect();
+    const off = e.clientX - box.left - box.width / 2;
+    if (off < 0 && off > best.offset) best = { offset: off, el: li };
+  }
+  if (best.el) list.insertBefore(dragging, best.el); else list.appendChild(dragging);
+});
+
+list.addEventListener('drop', e => e.preventDefault());
+
+list.addEventListener('dragend', () => {
+  const dragging = list.querySelector('.dragging');
+  if (dragging) dragging.classList.remove('dragging');
+  if (!dragId) return;
+  dragId = null;
+  const ids = [...list.querySelectorAll('li[data-id]')].map(li => li.dataset.id);
+  frames.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
+  persist(); renderFrames(); updateGhost();
+});
+
+/* ---------- settings controls ---------- */
+ghostToggle.addEventListener('change', () => {
+  settings.ghost = ghostToggle.checked;
+  persist(); updateGhost();
+});
+fpsSlider.addEventListener('input', () => {
+  settings.fps = +fpsSlider.value;
+  fpsVal.textContent = settings.fps;
+  persist();
+});
+
+$('#clear-btn').addEventListener('click', () => {
+  if (!frames.length) return;
+  if (confirm('Delete all ' + frames.length + ' frames? This cannot be undone.')) {
+    frames = [];
+    persist(); renderFrames(); updateGhost();
+    setStatus('All frames deleted.');
+  }
+});
+
+captureBtn.addEventListener('click', capture);
+$('#retry-cam').addEventListener('click', startCamera);
+
+/* ---------- init ---------- */
+loadState();
+fpsSlider.value = settings.fps;
+fpsVal.textContent = settings.fps;
+ghostToggle.checked = settings.ghost;
+renderFrames(); updateGhost(); startCamera();
+
+/* ---------- per-frame sound ---------- */
+function makeSndBtn(act, text, title) {
+  const b = document.createElement('button');
+  b.dataset.act = act;
+  b.textContent = text;
+  if (title) b.title = title;
+  return b;
+}
+function spawnSound(src) {
+  const el = new Audio(src);   // fresh player per trigger — same frame may overlap itself
+  activeAudios.push(el);
+  el.addEventListener('ended', () => {
+    const i = activeAudios.indexOf(el);
+    if (i !== -1) activeAudios.splice(i, 1);
+  });
+  const p = el.play();
+  if (p && p.catch) p.catch(() => {});
+}
+function stopAllSounds() {
+  while (activeAudios.length) activeAudios.pop().pause();
+}
+function playFrameSound(i) {
+  const f = frames[i];
+  if (!f || !f.sound) return;
+  spawnSound(f.sound);
+}
+function previewSound(frameId) {
+  const f = frames.find(x => x.id === frameId);
+  if (!f || !f.sound) return;
+  spawnSound(f.sound);
+}
+function removeSound(frameId) {
+  const f = frames.find(x => x.id === frameId);
+  if (!f) return;
+  delete f.sound;
+  persist(); renderFrames();
+}
+async function startRecording(frameId) {
+  if (recording) { stopRecording(); return; }
+  if (typeof MediaRecorder === 'undefined') return setStatus('MediaRecorder is not supported in this browser.', true);
+  let micStream;
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    return setStatus('Microphone unavailable (' + err.name + '). Allow mic access for this site, then try again.', true);
+  }
+  const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find(m => MediaRecorder.isTypeSupported(m)) || '';
+  let rec;
+  try { rec = new MediaRecorder(micStream, mime ? { mimeType: mime } : undefined); }
+  catch (err) { micStream.getTracks().forEach(t => t.stop()); return setStatus('Could not start the audio recorder.', true); }
+  const chunks = [];
+  rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  rec.onstop = () => {
+    micStream.getTracks().forEach(t => t.stop());
+    const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
+    if (!blob.size) { setStatus('Recording was empty — try again.', true); renderFrames(); return; }
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const f = frames.find(x => x.id === frameId);
+      if (f) { f.sound = reader.result; persist(); renderFrames(); setStatus('Sound attached to the frame.'); }
+      else { renderFrames(); setStatus('Frame was removed — recording discarded.', true); }
+    };
+    reader.readAsDataURL(blob);
+  };
+  rec.start(250);
+  recording = { frameId, rec, auto: setTimeout(stopRecording, 20000) };
+  renderFrames();
+  setStatus('Recording sound… click ■ Stop on the frame to finish (auto-stops at 20 s).');
+}
+function stopRecording() {
+  if (!recording) return;
+  const r = recording;
+  recording = null;
+  clearTimeout(r.auto);
+  try { r.rec.stop(); } catch (err) { /* already stopped */ }
+}
+
+/* ---------- playback ---------- */
+async function ensureLoaded() {
+  loadedImgs = await Promise.all(frames.map(f => new Promise((res, rej) => {
+    const im = new Image();
+    im.onload = () => res(im);
+    im.onerror = () => rej(new Error('frame load failed'));
+    im.src = f.url;
+  })));
+}
+function drawFrame(i) {
+  if (!loadedImgs.length) return;
+  const img = loadedImgs[((i % loadedImgs.length) + loadedImgs.length) % loadedImgs.length];
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  canvas.getContext('2d').drawImage(img, 0, 0);
+}
+function setPlayButtons() {
+  playBtn.innerHTML = playing ? '&#9208; Pause' : '&#9654; Play';
+  captureBtn.disabled = playing || !video.videoWidth;
+  exportBtn.disabled = playing;
+}
+async function togglePlay() {
+  if (playing) { pause(); return; }
+  if (!frames.length) { setStatus('No frames to play yet — capture some first.', true); return; }
+  playing = true; setPlayButtons();
+  try { await ensureLoaded(); } catch (e) { playing = false; setPlayButtons(); setStatus('Could not load frames for playback.', true); return; }
+  if (!playing) return;
+  playIndex = 0;
+  stage.dataset.mode = 'play';
+  showGhost(null);            // no ghost during playback
+  playFrameSound(0);
+  lastT = performance.now(); acc = 0;
+  rafId = requestAnimationFrame(tick);
+}
+function tick(now) {
+  if (!playing) return;
+  acc += now - lastT; lastT = now;
+  const stepMs = 1000 / settings.fps;
+  const prevIdx = playIndex;
+  while (acc >= stepMs) { acc -= stepMs; playIndex = (playIndex + 1) % frames.length; }
+  drawFrame(playIndex);
+  if (playIndex !== prevIdx) playFrameSound(playIndex);
+  rafId = requestAnimationFrame(tick);
+}
+function pause() {
+  backToCamera();
+}
+async function step(dir) {
+  if (!frames.length) return;
+  playing = false;
+  if (rafId) cancelAnimationFrame(rafId);
+  try { await ensureLoaded(); } catch (e) { return; }
+  playIndex = ((playIndex + dir) % frames.length + frames.length) % frames.length;
+  stage.dataset.mode = 'play';
+  showGhost(null);            // no ghost during playback/stepping
+  drawFrame(playIndex);
+  playFrameSound(playIndex);
+}
+
+/* ---------- export to WebM ---------- */
+async function exportVideo() {
+  if (!frames.length) return setStatus('No frames to export.', true);
+  if (typeof MediaRecorder === 'undefined') return setStatus('MediaRecorder is not supported in this browser — try Chrome or Firefox.', true);
+  stopAllSounds();
+  let imgs;
+  try { imgs = await ensureLoaded(); } catch (e) { return setStatus('Could not load frames for export.', true); }
+  canvas.width = imgs[0].naturalWidth;
+  canvas.height = imgs[0].naturalHeight;
+  const srcStream = canvas.captureStream(settings.fps);
+  let mime = 'video/webm;codecs=vp9';
+  if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm';
+  const rec = new MediaRecorder(srcStream, { mimeType: mime, videoBitsPerSecond: 8000000 });
+  const chunks = [];
+  rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  const stopped = new Promise(res => { rec.onstop = res; });
+
+  captureBtn.disabled = true; playBtn.disabled = true; exportBtn.disabled = true;
+  setStatus('Recording preview at ' + settings.fps + ' fps…');
+  rec.start();
+  await new Promise(resolve => {
+    let i = 0, last = performance.now(), a = 0;
+    const stepMs = 1000 / settings.fps;
+    canvas.getContext('2d').drawImage(imgs[0], 0, 0);
+    function frame(now) {
+      a += now - last; last = now;
+      while (a >= stepMs) { a -= stepMs; i++; }
+      if (i >= frames.length) return resolve();
+      canvas.getContext('2d').drawImage(imgs[i], 0, 0);
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  });
+  rec.stop(); await stopped;
+  const blob = new Blob(chunks, { type: 'video/webm' });
+  const aEl = document.createElement('a');
+  aEl.href = URL.createObjectURL(blob);
+  aEl.download = 'stopmotion.webm';
+  aEl.click();
+  setTimeout(() => URL.revokeObjectURL(aEl.href), 5000);
+  captureBtn.disabled = !video.videoWidth; playBtn.disabled = false; exportBtn.disabled = false;
+  setStatus('Exported stopmotion.webm (' + formatBytes(blob.size) + ').');
+}
+
+playBtn.addEventListener('click', togglePlay);
+$('#cam-btn').addEventListener('click', backToCamera);
+$('#step-back').addEventListener('click', () => step(-1));
+$('#step-fwd').addEventListener('click', () => step(1));
+exportBtn.addEventListener('click', exportVideo);
+})();
+</script>
+</body>
+</html>
