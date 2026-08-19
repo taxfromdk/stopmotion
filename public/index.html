@@ -104,20 +104,9 @@
   #frame-list li img { width: 100%; display: block; border-radius: 8px; pointer-events: none; }
   #frame-list li.dragging { opacity: .45; outline-color: var(--accent); }
   #frame-list li.selected { outline-color: var(--accent); }
-  /* Title-card frames: a taller card holding a mini preview + inline editor. */
+  /* Title-card frames: a mini preview in the filmstrip. */
   #frame-list li .title-body { display: flex; flex-direction: column; gap: 5px; padding: 4px; }
   #frame-list li .title-mini { width: 100%; border-radius: 6px; background: #000; display: block; }
-  #frame-list li .title-text {
-    width: 100%; box-sizing: border-box; resize: none; font: 12px/1.25 Georgia, "Times New Roman", serif;
-    color: var(--text); background: #0c0e12; border: 1px solid #394152; border-radius: 6px; padding: 5px 6px;
-    height: 58px;
-  }
-  #frame-list li .title-text:focus { border-color: var(--accent); outline: none; }
-  #frame-list li .title-dur { display: flex; align-items: center; gap: 6px; }
-  #frame-list li .title-dur span { font-size: 12px; color: var(--muted); min-width: 26px; text-align: right; font-variant-numeric: tabular-nums; }
-  #frame-list li .title-dur input[type="range"] { flex: 1; width: auto; min-width: 0; }
-  /* Give the reel more room so title-card editors fit without scrolling. */
-  #frames-panel { max-height: 320px; }
   .idx {
     position: absolute; top: 6px; left: 6px; z-index: 1;
     background: rgba(0,0,0,.72); border-radius: 6px; padding: 1px 8px; font-size: 12px;
@@ -142,6 +131,29 @@
   /* ---- publish ---- */
   #publish-btn { background: #2e7d5b; border-color: #3d9970; font-weight: 600; padding: 7px 14px; }
   #publish-btn:hover:not(:disabled) { background: #379268; }
+
+  /* ---- title-card editor overlay (shown on the stage when a title card is selected) ---- */
+  #title-editor {
+    position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%);
+    z-index: 10; width: min(420px, calc(100% - 32px));
+    background: rgba(20, 22, 28, 0.94); border: 1px solid #394152; border-radius: 12px;
+    padding: 14px 16px; display: none; flex-direction: column; gap: 10px;
+    box-shadow: 0 8px 32px rgba(0,0,0,.5);
+  }
+  #title-editor.visible { display: flex; }
+  #title-editor label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  #title-editor textarea {
+    width: 100%; box-sizing: border-box; resize: none; font: 13px/1.3 Georgia, "Times New Roman", serif;
+    color: var(--text); background: #0c0e12; border: 1px solid #394152; border-radius: 8px; padding: 8px 10px; height: 64px;
+  }
+  #title-editor textarea:focus { border-color: var(--accent); outline: none; }
+  #title-editor .dur-row { display: flex; align-items: center; gap: 8px; }
+  #title-editor .dur-row span { font-size: 12px; color: var(--muted); min-width: 36px; text-align: right; font-variant-numeric: tabular-nums; }
+  #title-editor .dur-row input[type="range"] { flex: 1; width: auto; }
+  #title-editor .close-btn {
+    position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; padding: 0;
+    line-height: 22px; border-radius: 6px; background: rgba(255,255,255,.08); font-size: 14px;
+  }
   #pub-overlay {
     position: fixed; inset: 0; z-index: 50; background: rgba(5, 7, 10, .62);
     display: flex; align-items: center; justify-content: center; padding: 16px;
@@ -203,6 +215,15 @@
       <img id="ghost" alt="" draggable="false" />
       <canvas id="playback"></canvas>
       <div id="flash"></div>
+      <div id="title-editor">
+        <button class="close-btn" title="Close">&times;</button>
+        <label>Card text (max 3 lines, 30 chars each)</label>
+        <textarea rows="3" placeholder="Type the card text…"></textarea>
+        <div class="dur-row">
+          <span class="dur-val">3s</span>
+          <input type="range" class="dur-slider" min="0" max="10" step="0.5" value="3" title="How long the card is shown" />
+        </div>
+      </div>
     </div>
   </section>
 
@@ -495,37 +516,15 @@ function renderFrames() {
       }
       let body;
       if (isTitleCard(f)) {
-        // Title card: a mini canvas thumbnail + an inline editor (text + duration).
+        // Title card: a mini canvas thumbnail. Text/duration are edited in the
+        // stage overlay (click the card to open the editor).
         body = document.createElement('div');
         body.className = 'title-body';
         const mini = document.createElement('canvas');
         mini.className = 'title-mini';
         mini.width = 132; mini.height = 74;
         drawTitleCard(mini.getContext('2d'), 132, 74, f);
-        const ta = document.createElement('textarea');
-        ta.className = 'title-text';
-        ta.rows = 3;
-        ta.placeholder = 'Type the card text… (max 3 lines, 30 chars)';
-        ta.value = f.title || '';
-        ta.addEventListener('input', () => {
-          setTitleText(f.id, ta.value);
-          drawTitleCard(mini.getContext('2d'), 132, 74, frames.find(x => x.id === f.id));
-        });
-        const durRow = document.createElement('div');
-        durRow.className = 'title-dur';
-        const durLabel = document.createElement('span');
-        durLabel.textContent = (f.titleSeconds || TITLE_DEFAULT_SECONDS) + 's';
-        const durSlider = document.createElement('input');
-        durSlider.type = 'range';
-        durSlider.min = '0'; durSlider.max = String(TITLE_MAX_SECONDS); durSlider.step = '0.5';
-        durSlider.value = String(f.titleSeconds || TITLE_DEFAULT_SECONDS);
-        durSlider.title = 'How long the card shows (0.5–10 s)';
-        durSlider.addEventListener('input', () => {
-          durLabel.textContent = (+durSlider.value) + 's';
-          setTitleDuration(f.id, +durSlider.value);
-        });
-        durRow.append(durLabel, durSlider);
-        body.append(mini, ta, durRow);
+        body.appendChild(mini);
         li.append(idx, body, del, bar);
       } else {
         const img = document.createElement('img');
@@ -539,6 +538,54 @@ function renderFrames() {
   markSelected();
   updateStorageInfo();
 }
+
+/* ---------- title-card editor overlay (on the stage) ---------- */
+const titleEditor = $('#title-editor');
+const titleTa = titleEditor.querySelector('textarea');
+const titleDurSlider = titleEditor.querySelector('.dur-slider');
+const titleDurVal = titleEditor.querySelector('.dur-val');
+let titleEditorFrameId = null;
+
+function showTitleEditor(frameId) {
+  const f = frames.find(x => x.id === frameId);
+  if (!f || f.type !== 'title') return hideTitleEditor();
+  titleEditorFrameId = frameId;
+  titleTa.value = f.title || '';
+  titleDurSlider.value = String(f.titleSeconds || TITLE_DEFAULT_SECONDS);
+  titleDurVal.textContent = (f.titleSeconds || TITLE_DEFAULT_SECONDS) + 's';
+  titleEditor.classList.add('visible');
+}
+function hideTitleEditor() {
+  titleEditorFrameId = null;
+  titleEditor.classList.remove('visible');
+}
+titleTa.addEventListener('input', () => {
+  if (!titleEditorFrameId) return;
+  setTitleText(titleEditorFrameId, titleTa.value);
+  // Refresh the mini preview in the filmstrip.
+  const f = frames.find(x => x.id === titleEditorFrameId);
+  if (f) {
+    const li = list.querySelector('li[data-id="' + titleEditorFrameId + '"]');
+    const mini = li && li.querySelector('.title-mini');
+    if (mini) drawTitleCard(mini.getContext('2d'), 132, 74, f);
+  }
+});
+titleDurSlider.addEventListener('input', () => {
+  if (!titleEditorFrameId) return;
+  setTitleDuration(titleEditorFrameId, +titleDurSlider.value);
+  titleDurVal.textContent = (+titleDurSlider.value) + 's';
+  const f = frames.find(x => x.id === titleEditorFrameId);
+  if (f) {
+    const li = list.querySelector('li[data-id="' + titleEditorFrameId + '"]');
+    const mini = li && li.querySelector('.title-mini');
+    if (mini) drawTitleCard(mini.getContext('2d'), 132, 74, f);
+  }
+});
+titleEditor.querySelector('.close-btn').addEventListener('click', e => {
+  e.stopPropagation();
+  hideTitleEditor();
+  backToCamera();
+});
 
 /* ---------- frame selection / show on stage ---------- */
 function markSelected() {
@@ -554,6 +601,19 @@ async function selectFrame(id) {
   playing = false;
   if (rafId) cancelAnimationFrame(rafId);
   stopAllSounds();
+  const f = frames[i];
+  if (isTitleCard(f)) {
+    // Show the title card on the playback canvas + the editor overlay.
+    stage.dataset.mode = 'play';
+    showTitleEditor(id);
+    // Draw the card on the canvas.
+    const W = 960, H = 540;
+    canvas.width = W; canvas.height = H;
+    drawTitleCard(canvas.getContext('2d'), W, H, f);
+    setStatus('Edit the card text and duration in the panel below.');
+    return;
+  }
+  hideTitleEditor();
   try { await ensureLoaded(); } catch (err) { return; }
   playIndex = i;
   stage.dataset.mode = 'play';
@@ -565,6 +625,7 @@ function backToCamera() {
   if (rafId) cancelAnimationFrame(rafId);
   stopAllSounds();
   stage.dataset.mode = 'camera';
+  hideTitleEditor();
   setPlayButtons(); updateGhost();
 }
 
@@ -1040,12 +1101,13 @@ $('#pub-copy').addEventListener('click', async () => {
 
 /* ---------- playback ---------- */
 /* Draw a title card (silent-film "sign") onto a canvas: black background,
-   ornate corner/side decorations, centered white text in an old-fashioned
-   serif face, up to 3 lines of 30 chars. */
+   ornate corner/side decorations (gold border + white curly scrollwork),
+   centered white text in an old-fashioned serif face, up to 3 lines of 30 chars. */
 function drawTitleCard(ctx, W, H, f) {
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, W, H);
   const gold = '#c9a24a';
+  const white = '#fff';
   const u = Math.max(2, Math.min(W, H) / 90);
   const lines = titleLines(f);
   const fontPx = Math.max(11, Math.min(W / 12, H / 6));
@@ -1056,25 +1118,95 @@ function drawTitleCard(ctx, W, H, f) {
   ctx.strokeRect(u * 2, u * 2, W - u * 4, H - u * 4);
   ctx.lineWidth = Math.max(1, u * 0.6);
   ctx.strokeRect(u * 3.4, u * 3.4, W - u * 6.8, H - u * 6.8);
-  // Corner ornaments (flourish + dot) in each corner
-  const co = (cx, cy) => {
+
+  // Curly white scrollwork ornaments
+  ctx.strokeStyle = white;
+  ctx.fillStyle = white;
+  ctx.lineWidth = Math.max(1.5, u * 0.5);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  // Draw a single curly scroll (spiral flourish) at (cx, cy) with a rotation.
+  const scroll = (cx, cy, rot) => {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(rot);
     ctx.beginPath();
-    ctx.arc(cx, cy, u * 2.1, 0, Math.PI * 2);
-    ctx.moveTo(cx - u * 4.5, cy); ctx.lineTo(cx - u * 2.1, cy);
-    ctx.moveTo(cx + u * 2.1, cy); ctx.lineTo(cx + u * 4.5, cy);
-    ctx.moveTo(cx, cy - u * 4.5); ctx.lineTo(cx, cy - u * 2.1);
-    ctx.moveTo(cx, cy + u * 2.1); ctx.lineTo(cx, cy + u * 4.5);
+    // Main curl: a small spiral made of arcs
+    const r1 = u * 1.2, r2 = u * 0.7, r3 = u * 0.4;
+    ctx.moveTo(0, 0);
+    ctx.arc(0, 0, r1, Math.PI, Math.PI * 1.5, false);
+    ctx.arc(r1 * 0.5, r1 * 0.5, r2, Math.PI * 1.5, Math.PI * 2.2, false);
+    ctx.arc(r1 * 0.3, r1 * 0.3, r3, Math.PI * 2.2, Math.PI * 2.8, false);
     ctx.stroke();
+    // A small dot at the center
     ctx.beginPath();
-    ctx.arc(cx, cy, u * 0.8, 0, Math.PI * 2);
+    ctx.arc(0, 0, u * 0.3, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
   };
-  const m = u * 5.5;
-  co(m, m); co(W - m, m); co(m, H - m); co(W - m, H - m);
-  // Side ornaments (diamond at the midpoint of each edge)
+
+  // Corner scrolls: four corners, each rotated to face inward
+  const cm = u * 4.5;
+  scroll(cm, cm, 0);
+  scroll(W - cm, cm, Math.PI / 2);
+  scroll(W - cm, H - cm, Math.PI);
+  scroll(cm, H - cm, -Math.PI / 2);
+
+  // Side mid-point curls (top, bottom, left, right)
+  const sm = u * 3;
+  // Top center
+  ctx.save();
+  ctx.translate(W / 2, cm);
+  ctx.beginPath();
+  const sr = u * 1.0;
+  ctx.moveTo(-sr * 2, 0);
+  ctx.arc(-sr, 0, sr, Math.PI, Math.PI * 2, false);
+  ctx.arc(0, 0, sr * 0.6, 0, Math.PI, false);
+  ctx.arc(sr * 0.5, 0, sr * 0.35, Math.PI, 0, true);
+  ctx.stroke();
+  ctx.restore();
+  // Bottom center
+  ctx.save();
+  ctx.translate(W / 2, H - cm);
+  ctx.beginPath();
+  ctx.moveTo(-sr * 2, 0);
+  ctx.arc(-sr, 0, sr, Math.PI, Math.PI * 2, false);
+  ctx.arc(0, 0, sr * 0.6, 0, Math.PI, false);
+  ctx.arc(sr * 0.5, 0, sr * 0.35, Math.PI, 0, true);
+  ctx.stroke();
+  ctx.restore();
+  // Left center
+  ctx.save();
+  ctx.translate(cm, H / 2);
+  ctx.rotate(Math.PI / 2);
+  ctx.beginPath();
+  ctx.moveTo(-sr * 2, 0);
+  ctx.arc(-sr, 0, sr, Math.PI, Math.PI * 2, false);
+  ctx.arc(0, 0, sr * 0.6, 0, Math.PI, false);
+  ctx.arc(sr * 0.5, 0, sr * 0.35, Math.PI, 0, true);
+  ctx.stroke();
+  ctx.restore();
+  // Right center
+  ctx.save();
+  ctx.translate(W - cm, H / 2);
+  ctx.rotate(Math.PI / 2);
+  ctx.beginPath();
+  ctx.moveTo(-sr * 2, 0);
+  ctx.arc(-sr, 0, sr, Math.PI, Math.PI * 2, false);
+  ctx.arc(0, 0, sr * 0.6, 0, Math.PI, false);
+  ctx.arc(sr * 0.5, 0, sr * 0.35, Math.PI, 0, true);
+  ctx.stroke();
+  ctx.restore();
+
+  // Diamond accents at the side midpoints (gold, smaller)
+  ctx.fillStyle = gold;
   const dia = (x, y, r) => { ctx.beginPath(); ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath(); ctx.fill(); };
-  dia(W / 2, m, u * 1.4); dia(W / 2, H - m, u * 1.4);
-  dia(m, H / 2, u * 1.4); dia(W - m, H / 2, u * 1.4);
+  dia(W / 2, u * 2.5, u * 0.9);
+  dia(W / 2, H - u * 2.5, u * 0.9);
+  dia(u * 2.5, H / 2, u * 0.9);
+  dia(W - u * 2.5, H / 2, u * 0.9);
+
   // Centered text
   const nonEmpty = lines.filter(l => l.trim()).length;
   ctx.fillStyle = '#fff';
@@ -1141,17 +1273,22 @@ async function togglePlay() {
 function tick(now) {
   if (!playing) return;
   rafId = requestAnimationFrame(tick);
-  if (soundHold && !soundHold.ended) return;   // hold this frame until its sound finishes
+  // A title card advances by its own duration (titleMs), not by the sound-hold
+  // gate — otherwise a sound that errors or never fires `ended` holds the card
+  // forever. Normal frames still obey the sound-hold gate.
+  const cur = frames[playIndex];
+  if (!isTitleCard(cur) && soundHold && !soundHold.ended) return;
   acc += now - lastT; lastT = now;
   const stepMs = 1000 / settings.fps;
   const prevIdx = playIndex;
   while (acc >= stepMs) {
     acc -= stepMs;
-    const cur = frames[playIndex];
-    if (isTitleCard(cur)) {
+    const cur2 = frames[playIndex];
+    if (isTitleCard(cur2)) {
       // A title card shows for its duration (titleSeconds); bank the time and
       // hold the card, advancing only when it has been shown long enough.
-      acc = Math.min(acc + stepMs, titleMs(cur) || stepMs);
+      acc = Math.min(acc + stepMs, titleMs(cur2) || stepMs);
+      if (acc < stepMs) break;   // card still showing — wait for more time
       continue;
     }
     if (playIndex < frames.length - 1) playIndex++;
