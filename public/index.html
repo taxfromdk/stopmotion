@@ -1115,6 +1115,7 @@ async function togglePlay() {
   hideTitleEditor();
   stage.dataset.mode = 'play';
   showGhost(null);            // no ghost during playback
+  drawFrame(0);
   playFrameSound(0);
   lastT = performance.now(); acc = 0;
   rafId = requestAnimationFrame(tick);

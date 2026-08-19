@@ -156,6 +156,7 @@ function play() {
   playing = true; stopAllSounds();
   if (playIndex >= frames.length) playIndex = 0;
   lastT = performance.now(); acc = 0;
+  drawFrame(playIndex);
   playFrameSound(playIndex); setPlayButtons();
   rafId = requestAnimationFrame(tick);
 }
