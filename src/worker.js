@@ -64,6 +64,12 @@ function json(data, status = 200) {
 function keyFor(code) {
   return KEY_PREFIX + code + '.zip';
 }
+/* Sidecar metadata object holding the publishing context (ip/origin/ua).
+   R2 does not persist arbitrary customMetadata on objects, so the context
+   travels in a separate JSON object next to the work zip. */
+function metaKeyFor(code) {
+  return KEY_PREFIX + code + '.meta.json';
+}
 function notFoundPage(code) {
   const html = '<!doctype html><html lang="en"><head><meta charset="utf-8"/>' +
     '<meta name="viewport" content="width=device-width,initial-scale=1"/>' +
@@ -204,20 +210,20 @@ async function handlePublish(request, env) {
   // Publishing context: who/where the work was made from, for the admin list
   // and viewer. ip from the CF header; the editor forwards document.referrer
   // and navigator.userAgent via custom headers (both are forbidden on a
-  // browser fetch). Stored as R2 HTTP metadata so it travels with the object.
+  // browser fetch). Stored as a sidecar object (projects/{code}.meta.json)
+  // because R2 does not persist arbitrary customMetadata on objects.
   const pubIp = request.headers.get('cf-connecting-ip') || '';
   const pubOrigin = request.headers.get('x-publish-origin') || '';
   const pubUa = (request.headers.get('x-publish-ua') || '').slice(0, 200);
   await env.BUCKET.put(keyFor(code), bytes, {
-    httpMetadata: {
-      contentType: 'application/zip',
-      customMetadata: {
-        ip: pubIp,
-        origin: pubOrigin,
-        ua: pubUa,
-      },
-    },
+    httpMetadata: { contentType: 'application/zip' },
   });
+  await env.BUCKET.put(metaKeyFor(code), JSON.stringify({
+    ip: pubIp,
+    origin: pubOrigin,
+    ua: pubUa,
+    publishedAt: new Date().toISOString(),
+  }), { httpMetadata: { contentType: 'application/json' } });
   const origin = new URL(request.url).origin;
   return json({ code, url: origin + '/' + code, size: bytes.length });
 }
@@ -227,18 +233,31 @@ async function handleProject(code, env) {
   if (!obj) return json({ error: 'Work with code "' + code + '" was not found.' }, 404);
   // Expose the publishing context (ip/origin/ua) as X-Work-* headers so the
   // viewer can show where the work was made from. Custom headers are readable
-  // from the browser's fetch.
-  const meta = (obj.httpMetadata && obj.httpMetadata.customMetadata) || {};
+  // from the browser's fetch. The context lives in a sidecar meta object.
   const headers = {
     'content-type': 'application/zip',
     'content-length': String(obj.size),
     'cache-control': 'public, max-age=3600',
     'x-content-type-options': 'nosniff',
   };
+  const meta = await readWorkMeta(env, code);
   if (meta.ip) headers['x-work-ip'] = meta.ip;
   if (meta.origin) headers['x-work-origin'] = meta.origin;
   if (meta.ua) headers['x-work-ua'] = meta.ua;
   return new Response(obj.body, { headers });
+}
+
+/* Read a work's sidecar publishing-context object. Returns {ip,origin,ua}
+   (blank fields for works published before the feature existed). */
+async function readWorkMeta(env, code) {
+  try {
+    const obj = await env.BUCKET.get(metaKeyFor(code));
+    if (!obj) return { ip: '', origin: '', ua: '' };
+    const meta = JSON.parse(new TextDecoder().decode(obj.body));
+    return { ip: meta.ip || '', origin: meta.origin || '', ua: meta.ua || '' };
+  } catch (err) {
+    return { ip: '', origin: '', ua: '' };
+  }
 }
 
 /* ---------- admin ---------- */
@@ -252,20 +271,12 @@ async function listAllWorks(env) {
       const m = o.key.match(new RegExp('^' + KEY_PREFIX + '([a-z]{' + CODE_LEN + '})\\.zip$'));
       if (!m) continue;
       const work = { code: m[1], size: o.size, updated: o.uploaded, ip: '', origin: '', ua: '' };
-      // Read back the publishing context (ip/origin/ua) stored as R2 HTTP
-      // metadata at publish time. Use a range-limited get (just the first
-      // byte) so we fetch the metadata WITHOUT downloading each object's
-      // body — a full get pulls the whole work (up to 50 MB) and would hang
-      // this endpoint. Best-effort: older works have no metadata.
-      try {
-        const obj = await env.BUCKET.get(o.key, { range: { offset: 0, count: 1 } });
-        if (obj) {
-          const meta = (obj && obj.httpMetadata && obj.httpMetadata.customMetadata) || {};
-          work.ip = meta.ip || '';
-          work.origin = meta.origin || '';
-          work.ua = meta.ua || '';
-        }
-      } catch (err) { /* metadata is optional — leave blank */ }
+      // Read back the publishing context from the sidecar meta object
+      // (small JSON, not the work zip). Best-effort: older works have none.
+      const meta = await readWorkMeta(env, m[1]);
+      work.ip = meta.ip;
+      work.origin = meta.origin;
+      work.ua = meta.ua;
       works.push(work);
     }
     cursor = res.truncated ? res.cursor : undefined;
