@@ -123,15 +123,58 @@ let frames = [], settings = { fps: 8, loop: true };
 let playing = false, playIndex = 0, loadedImgs = [];
 let rafId = null, lastT = 0, acc = 0, soundHold = null;
 const hasSounds = () => frames.some(f => f.sound);
+/* Title cards (silent-film "sign" frames): black background, centered text. */
+const TITLE_MAX_LINES = 3;
+const TITLE_MAX_CHARS = 30; // per line
+function isTitleCard(f) { return !!(f && f.type === 'title'); }
+function titleLines(f) {
+  const raw = (f.title || '').split('\n').slice(0, TITLE_MAX_LINES);
+  while (raw.length < TITLE_MAX_LINES) raw.push('');
+  return raw.map(s => String(s).slice(0, TITLE_MAX_CHARS));
+}
+function drawTitleCard(ctx, W, H, f) {
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+  const lines = titleLines(f);
+  const fontPx = Math.max(11, Math.min(W / 12, H / 6));
+  const serif = 'Georgia, "Times New Roman", "Garamond", serif';
+  const nonEmpty = lines.filter(l => l.trim()).length;
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  if (!nonEmpty) {
+    ctx.font = 'italic ' + fontPx + 'px ' + serif;
+    ctx.globalAlpha = 0.5;
+    ctx.fillText('\u2014 \u2014', W / 2, H / 2);
+    ctx.globalAlpha = 1;
+    return;
+  }
+  const lineH = fontPx * 1.25;
+  const startY = H / 2 - ((nonEmpty - 1) * lineH) / 2;
+  ctx.font = fontPx + 'px ' + serif;
+  lines.forEach((line, i) => {
+    if (!line.trim()) return;
+    ctx.fillText(line, W / 2, startY + i * lineH);
+  });
+}
 
 function drawFrame(i) {
-  if (!loadedImgs.length) return;
-  const img = loadedImgs[i];
-  if (canvas.width !== img.naturalWidth || canvas.height !== img.naturalHeight) {
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
+  const f = frames[i];
+  const ctx = canvas.getContext('2d');
+  if (isTitleCard(f)) {
+    const W = 960, H = 540;
+    if (canvas.width !== W) canvas.width = W;
+    if (canvas.height !== H) canvas.height = H;
+    drawTitleCard(ctx, W, H, f);
+  } else {
+    const img = loadedImgs[i];
+    if (!img) return;
+    if (canvas.width !== img.naturalWidth || canvas.height !== img.naturalHeight) {
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+    }
+    ctx.drawImage(img, 0, 0);
   }
-  canvas.getContext('2d').drawImage(img, 0, 0);
   counter.textContent = (i + 1) + ' / ' + frames.length;
 }
 function setPlayButtons() {
@@ -219,8 +262,15 @@ bigplay.addEventListener('click', toggle);
     const project = JSON.parse(new TextDecoder().decode(files['project.json']));
     if (project.format !== 'stopmotion-project' || !Array.isArray(project.frames)) throw new Error('Unrecognized project file.');
     frames = project.frames.map(ref => {
-      if (!ref || typeof ref.image !== 'string' || !files[ref.image]) throw new Error('Missing image "' + ((ref && ref.image) || '?') + '".');
-      const f = { url: 'data:' + (ref.mime || 'image/jpeg') + ';base64,' + b64(files[ref.image]) };
+      let f;
+      if (ref && ref.type === 'title') {
+        // Title card: text travels in project.json, no image file.
+        const lines = Array.isArray(ref.title) ? ref.title : String(ref.title || '').split('\n');
+        f = { type: 'title', title: lines.slice(0, TITLE_MAX_LINES).map(s => String(s).slice(0, TITLE_MAX_CHARS)).join('\n') };
+      } else {
+        if (!ref || typeof ref.image !== 'string' || !files[ref.image]) throw new Error('Missing image "' + ((ref && ref.image) || '?') + '".');
+        f = { url: 'data:' + (ref.mime || 'image/jpeg') + ';base64,' + b64(files[ref.image]) };
+      }
       if (ref.sound) {
         if (!files[ref.sound.path]) throw new Error('Missing sound "' + ref.sound.path + '".');
         f.sound = 'data:' + (ref.sound.mime || 'audio/webm') + ';base64,' + b64(files[ref.sound.path]);
@@ -234,12 +284,15 @@ bigplay.addEventListener('click', toggle);
       settings.loop = project.settings.loop !== false;
     }
     fpsTag.textContent = settings.fps + ' fps' + (settings.loop ? ' · loops' : '');
-    loadedImgs = await Promise.all(frames.map(f => new Promise((res2, rej) => {
-      const im = new Image();
-      im.onload = () => res2(im);
-      im.onerror = () => rej(new Error('frame load failed'));
-      im.src = f.url;
-    })));
+    loadedImgs = await Promise.all(frames.map(f => {
+      if (isTitleCard(f)) return null;      // title cards have no image to load
+      return new Promise((res2, rej) => {
+        const im = new Image();
+        im.onload = () => res2(im);
+        im.onerror = () => rej(new Error('frame load failed'));
+        im.src = f.url;
+      });
+    }));
     msg.hidden = true;
     canvas.hidden = false;
     drawFrame(0);
