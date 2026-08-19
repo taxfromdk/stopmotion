@@ -1112,6 +1112,7 @@ async function togglePlay() {
   try { await ensureLoaded(); } catch (e) { playing = false; setPlayButtons(); setStatus('Could not load frames for playback.', true); return; }
   if (!playing) return;
   playIndex = 0;
+  hideTitleEditor();
   stage.dataset.mode = 'play';
   showGhost(null);            // no ghost during playback
   playFrameSound(0);
@@ -1152,6 +1153,7 @@ async function step(dir) {
   if (rafId) cancelAnimationFrame(rafId);
   try { await ensureLoaded(); } catch (e) { return; }
   playIndex = ((playIndex + dir) % frames.length + frames.length) % frames.length;
+  hideTitleEditor();
   stage.dataset.mode = 'play';
   showGhost(null);            // no ghost during playback/stepping
   drawFrame(playIndex);
