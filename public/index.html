@@ -94,8 +94,8 @@
   .panel-head h2 { margin: 0; font-size: 15px; }
   #frame-meta { color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #frame-list {
-    list-style: none; margin: 0; padding: 8px 12px; flex: 1; overflow-x: auto; overflow-y: hidden;
-    display: flex; flex-direction: row; align-items: center; gap: 8px; user-select: none; min-height: 60px;
+    list-style: none; margin: 0; padding: 8px 12px; flex: 1; overflow-x: auto; overflow-y: auto;
+    display: flex; flex-direction: row; align-items: flex-start; gap: 8px; user-select: none; min-height: 60px;
   }
   #frame-list li {
     position: relative; margin: 0; width: 132px; flex-shrink: 0; border-radius: 8px;
@@ -104,6 +104,20 @@
   #frame-list li img { width: 100%; display: block; border-radius: 8px; pointer-events: none; }
   #frame-list li.dragging { opacity: .45; outline-color: var(--accent); }
   #frame-list li.selected { outline-color: var(--accent); }
+  /* Title-card frames: a taller card holding a mini preview + inline editor. */
+  #frame-list li .title-body { display: flex; flex-direction: column; gap: 5px; padding: 4px; }
+  #frame-list li .title-mini { width: 100%; border-radius: 6px; background: #000; display: block; }
+  #frame-list li .title-text {
+    width: 100%; box-sizing: border-box; resize: none; font: 12px/1.25 Georgia, "Times New Roman", serif;
+    color: var(--text); background: #0c0e12; border: 1px solid #394152; border-radius: 6px; padding: 5px 6px;
+    height: 58px;
+  }
+  #frame-list li .title-text:focus { border-color: var(--accent); outline: none; }
+  #frame-list li .title-dur { display: flex; align-items: center; gap: 6px; }
+  #frame-list li .title-dur span { font-size: 12px; color: var(--muted); min-width: 26px; text-align: right; font-variant-numeric: tabular-nums; }
+  #frame-list li .title-dur input[type="range"] { flex: 1; width: auto; min-width: 0; }
+  /* Give the reel more room so title-card editors fit without scrolling. */
+  #frames-panel { max-height: 320px; }
   .idx {
     position: absolute; top: 6px; left: 6px; z-index: 1;
     background: rgba(0,0,0,.72); border-radius: 6px; padding: 1px 8px; font-size: 12px;
@@ -161,6 +175,7 @@
 </header>
 <div id="ctrl-bar">
   <button id="capture-btn">&#128247; Capture</button>
+  <button id="title-btn" title="Add a silent-film title card (a black, ornate card with text) to build the story">&#65291; Title card</button>
   <button id="flip-cam" title="Switch to the next camera" disabled>&#8634; Flip camera</button>
   <label class="ghost-label" title="Overlay the last captured frame at 50% opacity so you can align objects between shots">
     <input type="checkbox" id="ghost-toggle" /> Ghost prev.
@@ -225,6 +240,11 @@ const KEY_SETTINGS = 'stopmotion.settings.v1';
 const MAX_FRAMES = 500;     // hard cap on the number of frames (images)
 const MAX_SOUNDS = 50;      // hard cap on the number of frames that carry a sound
 const MAX_SOUND_MS = 10000; // sound recordings auto-stop at 10 s
+/* Title cards (silent-film "sign" frames): black, ornate, centered text. */
+const TITLE_MAX_LINES = 3;
+const TITLE_MAX_CHARS = 30; // per line
+const TITLE_MAX_SECONDS = 10;
+const TITLE_DEFAULT_SECONDS = 3;
 
 let frames = [];            // [{id, url}] in playback order
 /* Publish gating: baseFingerprint is null for an original session (can
@@ -233,7 +253,10 @@ let frames = [];            // [{id, url}] in playback order
    changes (you can't republish an unmodified copy). */
 let baseFingerprint = null;
 function workFingerprint() {
-  return JSON.stringify(frames.map(f => [f.url, f.sound || null, !!f.hold]));
+  return JSON.stringify(frames.map(f => [
+    isTitleCard(f) ? 'title:' + (f.title || '') + ':' + (f.titleSeconds || 0) : f.url,
+    f.sound || null, !!f.hold
+  ]));
 }
 let settings = { fps: 8, ghost: true, loop: true };
 let stream = null;
@@ -293,7 +316,7 @@ function persist() {
 function loadState() {
   try {
     const f = JSON.parse(localStorage.getItem(KEY_FRAMES));
-    if (Array.isArray(f)) frames = f.filter(x => x && typeof x.url === 'string');
+    if (Array.isArray(f)) frames = f.filter(x => x && (typeof x.url === 'string' || x.type === 'title'));
     const s = JSON.parse(localStorage.getItem(KEY_SETTINGS));
     if (s) settings = Object.assign(settings, s);
   } catch (e) { /* first run */ }
@@ -375,6 +398,48 @@ function showGhost(url) {
 function updateGhost() {           // camera mode: the frame before the next shot = last in reel
   showGhost(frames.length ? frames[frames.length - 1].url : null);
 }
+
+/* ---------- title cards (silent-film "sign" frames) ----------
+   A title card is a frame with no image: a black, ornate card with centered
+   text (fixed font, max 3 lines of 30 chars) that shows for a chosen duration.
+   It can be mixed with normal frames and carry a sound like any frame. */
+function isTitleCard(f) { return !!(f && f.type === 'title'); }
+function titleLines(f) {
+  const raw = (f.title || '').split('\n').slice(0, TITLE_MAX_LINES);
+  while (raw.length < TITLE_MAX_LINES) raw.push('');
+  return raw.map(s => String(s).slice(0, TITLE_MAX_CHARS));
+}
+function titleMs(f) {
+  if (f.type !== 'title' || !settings.fps) return 0;
+  const s = Math.min(TITLE_MAX_SECONDS, Math.max(0, +f.titleSeconds || TITLE_DEFAULT_SECONDS));
+  return Math.round((s * settings.fps) * 1000);   // 1 second = settings.fps frames
+}
+function addTitleCard() {
+  if (frames.length >= MAX_FRAMES) {
+    setStatus('Frame limit reached (' + MAX_FRAMES + ' frames). Delete some frames to add more.', true);
+    return;
+  }
+  const f = { id: uid(), type: 'title', title: '', titleSeconds: TITLE_DEFAULT_SECONDS, createdAt: new Date().toISOString() };
+  const ci = cursorId ? frames.findIndex(x => x.id === cursorId) : -1;
+  if (ci >= 0) frames.splice(ci + 1, 0, f); else frames.push(f);
+  cursorId = f.id;
+  persist(); renderFrames();
+  stage.dataset.mode = 'camera';
+  setStatus('Title card added — click it in the reel to type the text and set how long it shows.');
+}
+function setTitleText(frameId, text) {
+  const f = frames.find(x => x.id === frameId);
+  if (!f || f.type !== 'title') return;
+  const lines = text.split('\n').slice(0, TITLE_MAX_LINES).map(s => s.slice(0, TITLE_MAX_CHARS));
+  f.title = lines.join('\n');
+  persist();
+}
+function setTitleDuration(frameId, seconds) {
+  const f = frames.find(x => x.id === frameId);
+  if (!f || f.type !== 'title') return;
+  f.titleSeconds = Math.min(TITLE_MAX_SECONDS, Math.max(0, Math.round(+seconds)));
+  persist();
+}
 function capture() {
   if (frames.length >= MAX_FRAMES) {
     setStatus('Frame limit reached (' + MAX_FRAMES + ' frames). Delete some frames to capture more.', true);
@@ -411,8 +476,6 @@ function renderFrames() {
       li.dataset.id = f.id;
       const idx = document.createElement('span');
       idx.className = 'idx'; idx.textContent = i + 1;
-      const img = document.createElement('img');
-      img.src = f.url; img.alt = 'Frame ' + (i + 1); img.draggable = false;
       const del = document.createElement('button');
       del.className = 'del'; del.title = 'Delete frame'; del.textContent = '\u00d7';
       const bar = document.createElement('div');
@@ -430,7 +493,45 @@ function renderFrames() {
         bar.appendChild(makeSndBtn('rec', '\ud83c\udfa7', f.sound ? 'Re-record sound (replaces current)' : 'Record a sound for this frame'));
         if (f.sound) bar.appendChild(makeSndBtn('rm-snd', '\u2715\u266a', 'Remove sound'));
       }
-      li.append(idx, img, del, bar);
+      let body;
+      if (isTitleCard(f)) {
+        // Title card: a mini canvas thumbnail + an inline editor (text + duration).
+        body = document.createElement('div');
+        body.className = 'title-body';
+        const mini = document.createElement('canvas');
+        mini.className = 'title-mini';
+        mini.width = 132; mini.height = 74;
+        drawTitleCard(mini.getContext('2d'), 132, 74, f);
+        const ta = document.createElement('textarea');
+        ta.className = 'title-text';
+        ta.rows = 3;
+        ta.placeholder = 'Type the card text… (max 3 lines, 30 chars)';
+        ta.value = f.title || '';
+        ta.addEventListener('input', () => {
+          setTitleText(f.id, ta.value);
+          drawTitleCard(mini.getContext('2d'), 132, 74, frames.find(x => x.id === f.id));
+        });
+        const durRow = document.createElement('div');
+        durRow.className = 'title-dur';
+        const durLabel = document.createElement('span');
+        durLabel.textContent = (f.titleSeconds || TITLE_DEFAULT_SECONDS) + 's';
+        const durSlider = document.createElement('input');
+        durSlider.type = 'range';
+        durSlider.min = '0'; durSlider.max = String(TITLE_MAX_SECONDS); durSlider.step = '0.5';
+        durSlider.value = String(f.titleSeconds || TITLE_DEFAULT_SECONDS);
+        durSlider.title = 'How long the card shows (0.5–10 s)';
+        durSlider.addEventListener('input', () => {
+          durLabel.textContent = (+durSlider.value) + 's';
+          setTitleDuration(f.id, +durSlider.value);
+        });
+        durRow.append(durLabel, durSlider);
+        body.append(mini, ta, durRow);
+        li.append(idx, body, del, bar);
+      } else {
+        const img = document.createElement('img');
+        img.src = f.url; img.alt = 'Frame ' + (i + 1); img.draggable = false;
+        li.append(idx, img, del, bar);
+      }
       list.appendChild(li);
     });
   }
@@ -554,6 +655,7 @@ $('#clear-btn').addEventListener('click', () => {
 });
 
 captureBtn.addEventListener('click', capture);
+$('#title-btn').addEventListener('click', addTitleCard);
 function flipCamera() {
   if (camDevices.length < 2) return;
   camIndex = (camIndex + 1) % camDevices.length;
@@ -715,10 +817,16 @@ async function buildProjectZip() {
   const entries = [];
   const frameRefs = frames.map((f, i) => {
     const n = String(i + 1).padStart(3, '0');
-    const img = parseDataUrl(f.url);
-    const imagePath = 'frames/' + n + '.' + extForMime(img.mime);
-    entries.push({ name: imagePath, data: b64ToBytes(img.b64) });
-    const ref = { id: f.id, image: imagePath, mime: img.mime };
+    let ref;
+    if (isTitleCard(f)) {
+      // Title card: no image file; the text and duration travel in project.json.
+      ref = { id: f.id, type: 'title', title: (f.title || '').split('\n').slice(0, TITLE_MAX_LINES).map(s => s.slice(0, TITLE_MAX_CHARS)), titleSeconds: Math.min(TITLE_MAX_SECONDS, Math.max(0, +f.titleSeconds || TITLE_DEFAULT_SECONDS)) };
+    } else {
+      const img = parseDataUrl(f.url);
+      const imagePath = 'frames/' + n + '.' + extForMime(img.mime);
+      entries.push({ name: imagePath, data: b64ToBytes(img.b64) });
+      ref = { id: f.id, image: imagePath, mime: img.mime };
+    }
     if (f.createdAt) ref.createdAt = f.createdAt;
     if (f.sound) {
       const snd = parseDataUrl(f.sound);
@@ -745,10 +853,16 @@ async function buildProjectZip() {
     version: 1,
     settings: { fps: settings.fps, ghost: !!settings.ghost, loop: !!settings.loop },
     frames: frameRefs.map(ref => {
-      const img = parseDataUrl(frames.find(f => f.id === ref.id).url);
-      const r = { image: ref.image, imageData: 'data:' + img.mime + ';base64,' + img.b64 };
+      const src = frames.find(f => f.id === ref.id);
+      let r;
+      if (ref.type === 'title') {
+        r = { type: 'title', title: ref.title, titleSeconds: ref.titleSeconds };
+      } else {
+        const img = parseDataUrl(src.url);
+        r = { image: ref.image, imageData: 'data:' + img.mime + ';base64,' + img.b64 };
+      }
       if (ref.sound) {
-        const snd = parseDataUrl(frames.find(f => f.id === ref.id).sound);
+        const snd = parseDataUrl(src.sound);
         r.sound = { path: ref.sound.path, data: 'data:' + snd.mime + ';base64,' + snd.b64 };
       }
       if (ref.hold) r.hold = true;
@@ -800,14 +914,21 @@ async function loadProjectFromFiles(files, label) {
   if (typeof project.version === 'number' && project.version > 1) throw new Error('Project version ' + project.version + ' is newer than this app supports.');
   const newFrames = [];
   for (const ref of project.frames) {
-    if (!ref || typeof ref.image !== 'string' || !files[ref.image]) throw new Error('Missing image file "' + ((ref && ref.image) || '?') + '" in the archive.');
-    let f = { id: uid(), url: 'data:' + (ref.mime || 'image/jpeg') + ';base64,' + bytesToB64(files[ref.image]) };
-    if (ref.createdAt) f.createdAt = ref.createdAt;
-    if (ref.sound) {
+    let f;
+    if (ref && ref.type === 'title') {
+      // Title card: text + duration come from project.json (no image file).
+      const lines = Array.isArray(ref.title) ? ref.title : String(ref.title || '').split('\n');
+      f = { id: uid(), type: 'title', title: lines.slice(0, TITLE_MAX_LINES).map(s => String(s).slice(0, TITLE_MAX_CHARS)).join('\n'), titleSeconds: Math.min(TITLE_MAX_SECONDS, Math.max(0, +ref.titleSeconds || TITLE_DEFAULT_SECONDS)) };
+    } else {
+      if (!ref || typeof ref.image !== 'string' || !files[ref.image]) throw new Error('Missing image file "' + ((ref && ref.image) || '?') + '" in the archive.');
+      f = { id: uid(), url: 'data:' + (ref.mime || 'image/jpeg') + ';base64,' + bytesToB64(files[ref.image]) };
+    }
+    if (ref && ref.createdAt) f.createdAt = ref.createdAt;
+    if (ref && ref.sound) {
       if (!files[ref.sound.path]) throw new Error('Missing sound file "' + ref.sound.path + '" in the archive.');
       f.sound = 'data:' + (ref.sound.mime || 'audio/webm') + ';base64,' + bytesToB64(files[ref.sound.path]);
     }
-    if (ref.hold) f.hold = true;
+    if (ref && ref.hold) f.hold = true;
     newFrames.push(f);
   }
   if (frames.length && !confirm('Replace the current ' + frames.length + ' frame(s) with ' + label + ' (' + newFrames.length + ' frame(s))?')) return 0;
@@ -918,20 +1039,87 @@ $('#pub-copy').addEventListener('click', async () => {
 });
 
 /* ---------- playback ---------- */
+/* Draw a title card (silent-film "sign") onto a canvas: black background,
+   ornate corner/side decorations, centered white text in an old-fashioned
+   serif face, up to 3 lines of 30 chars. */
+function drawTitleCard(ctx, W, H, f) {
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+  const gold = '#c9a24a';
+  const u = Math.max(2, Math.min(W, H) / 90);
+  const lines = titleLines(f);
+  const fontPx = Math.max(11, Math.min(W / 12, H / 6));
+  const serif = 'Georgia, "Times New Roman", "Garamond", serif';
+  // Outer + inner border frames
+  ctx.strokeStyle = gold;
+  ctx.lineWidth = Math.max(2, u * 1.4);
+  ctx.strokeRect(u * 2, u * 2, W - u * 4, H - u * 4);
+  ctx.lineWidth = Math.max(1, u * 0.6);
+  ctx.strokeRect(u * 3.4, u * 3.4, W - u * 6.8, H - u * 6.8);
+  // Corner ornaments (flourish + dot) in each corner
+  const co = (cx, cy) => {
+    ctx.beginPath();
+    ctx.arc(cx, cy, u * 2.1, 0, Math.PI * 2);
+    ctx.moveTo(cx - u * 4.5, cy); ctx.lineTo(cx - u * 2.1, cy);
+    ctx.moveTo(cx + u * 2.1, cy); ctx.lineTo(cx + u * 4.5, cy);
+    ctx.moveTo(cx, cy - u * 4.5); ctx.lineTo(cx, cy - u * 2.1);
+    ctx.moveTo(cx, cy + u * 2.1); ctx.lineTo(cx, cy + u * 4.5);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy, u * 0.8, 0, Math.PI * 2);
+    ctx.fill();
+  };
+  const m = u * 5.5;
+  co(m, m); co(W - m, m); co(m, H - m); co(W - m, H - m);
+  // Side ornaments (diamond at the midpoint of each edge)
+  const dia = (x, y, r) => { ctx.beginPath(); ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath(); ctx.fill(); };
+  dia(W / 2, m, u * 1.4); dia(W / 2, H - m, u * 1.4);
+  dia(m, H / 2, u * 1.4); dia(W - m, H / 2, u * 1.4);
+  // Centered text
+  const nonEmpty = lines.filter(l => l.trim()).length;
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  if (!nonEmpty) {
+    ctx.font = 'italic ' + fontPx + 'px ' + serif;
+    ctx.globalAlpha = 0.5;
+    ctx.fillText('\u2014 \u2014', W / 2, H / 2);
+    ctx.globalAlpha = 1;
+    return;
+  }
+  const lineH = fontPx * 1.25;
+  const startY = H / 2 - ((nonEmpty - 1) * lineH) / 2;
+  ctx.font = fontPx + 'px ' + serif;
+  lines.forEach((line, i) => {
+    if (!line.trim()) return;
+    ctx.fillText(line, W / 2, startY + i * lineH);
+  });
+}
 async function ensureLoaded() {
-  loadedImgs = await Promise.all(frames.map(f => new Promise((res, rej) => {
-    const im = new Image();
-    im.onload = () => res(im);
-    im.onerror = () => rej(new Error('frame load failed'));
-    im.src = f.url;
-  })));
+  loadedImgs = await Promise.all(frames.map(f => {
+    if (isTitleCard(f)) return null;      // title cards have no image to load
+    return new Promise((res, rej) => {
+      const im = new Image();
+      im.onload = () => res(im);
+      im.onerror = () => rej(new Error('frame load failed'));
+      im.src = f.url;
+    });
+  }));
 }
 function drawFrame(i) {
-  if (!loadedImgs.length) return;
-  const img = loadedImgs[((i % loadedImgs.length) + loadedImgs.length) % loadedImgs.length];
-  canvas.width = img.naturalWidth;
-  canvas.height = img.naturalHeight;
-  canvas.getContext('2d').drawImage(img, 0, 0);
+  const idx = ((i % loadedImgs.length) + loadedImgs.length) % loadedImgs.length;
+  const img = loadedImgs[idx];
+  const f = frames[idx];
+  const ctx = canvas.getContext('2d');
+  if (isTitleCard(f)) {
+    const W = 960, H = 540;
+    canvas.width = W; canvas.height = H;
+    drawTitleCard(ctx, W, H, f);
+  } else if (img) {
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    ctx.drawImage(img, 0, 0);
+  }
 }
 function setPlayButtons() {
   playBtn.innerHTML = playing ? '&#9208; Pause' : '&#9654; Play';
@@ -959,6 +1147,13 @@ function tick(now) {
   const prevIdx = playIndex;
   while (acc >= stepMs) {
     acc -= stepMs;
+    const cur = frames[playIndex];
+    if (isTitleCard(cur)) {
+      // A title card shows for its duration (titleSeconds); bank the time and
+      // hold the card, advancing only when it has been shown long enough.
+      acc = Math.min(acc + stepMs, titleMs(cur) || stepMs);
+      continue;
+    }
     if (playIndex < frames.length - 1) playIndex++;
     else if (!settings.loop) { finishAtEnd(); return; }   // play-once: stop after the last frame
     else playIndex = 0;                                    // loop: wrap back to the first

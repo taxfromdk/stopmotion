@@ -40,6 +40,15 @@ backend that lets anyone publish their work to a shareable 5-letter link
   (capture/record are blocked with an explanatory message) and again in the
   worker's `validateProjectZip`, so a hand-crafted or outdated project can't
   exceed them.
+- **Title cards** (`＋ Title card` button): a silent-film "sign" frame — a
+  black card with gold corner/side ornaments and centered white text in an
+  old-fashioned serif face. Up to **3 lines of 30 characters**, fixed font
+  size. A **duration slider** (0.5–10 s) sets how long the card is shown.
+  Title cards can be **mixed with normal frames** and **carry a sound** like
+  any frame, so they can be used to build a story. They are stored as text
+  (`type:"title"` in `project.json`, no image file) and are rendered by both
+  the editor and the offline `player.html`, so a downloaded/published film
+  plays its title cards too.
 - **Publish gating**: an original session can publish once it has at least
   one frame. A forked or uploaded project cannot be republished until it has
   been changed (the work's fingerprint is compared against the loaded

@@ -60,13 +60,21 @@ let rafId = null, lastT = 0, acc = 0, soundHold = null;
 const hasSounds = () => frames.some(f => f.sound);
 
 function drawFrame(i) {
-  if (!loadedImgs.length) return;
-  const img = loadedImgs[i];
-  if (canvas.width !== img.naturalWidth || canvas.height !== img.naturalHeight) {
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
+  const f = frames[i];
+  const ctx = canvas.getContext('2d');
+  if (isTitleCard(f)) {
+    const W = 960, H = 540;
+    canvas.width = W; canvas.height = H;
+    drawTitleCard(ctx, W, H, f);
+  } else {
+    const img = loadedImgs[i];
+    if (!img) return;
+    if (canvas.width !== img.naturalWidth || canvas.height !== img.naturalHeight) {
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+    }
+    ctx.drawImage(img, 0, 0);
   }
-  canvas.getContext('2d').drawImage(img, 0, 0);
   counter.textContent = (i + 1) + ' / ' + frames.length;
 }
 function setPlayButtons() {
@@ -75,6 +83,67 @@ function setPlayButtons() {
   bigplay.hidden = playing || !frames.length;
   bigplay.title = playing ? 'Pause' : 'Play';
   bigplay.innerHTML = playing ? '&#9208;' : '&#9654;';
+}
+/* Title cards (silent-film "sign" frames). */
+function isTitleCard(f) { return !!(f && f.type === 'title'); }
+function titleLines(f) {
+  let raw = Array.isArray(f.title) ? f.title : String(f.title || '').split('\n');
+  raw = raw.slice(0, 3); while (raw.length < 3) raw.push('');
+  return raw.map(s => String(s).slice(0, 30));
+}
+function titleMs(f) {
+  if (!isTitleCard(f) || !settings.fps) return 0;
+  const s = Math.min(10, Math.max(0, +f.titleSeconds || 3));
+  return Math.round(s * settings.fps * 1000);
+}
+function drawTitleCard(ctx, W, H, f) {
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+  const gold = '#c9a24a';
+  const u = Math.max(2, Math.min(W, H) / 90);
+  const lines = titleLines(f);
+  const fontPx = Math.max(11, Math.min(W / 12, H / 6));
+  const serif = 'Georgia, "Times New Roman", "Garamond", serif';
+  ctx.strokeStyle = gold;
+  ctx.lineWidth = Math.max(2, u * 1.4);
+  ctx.strokeRect(u * 2, u * 2, W - u * 4, H - u * 4);
+  ctx.lineWidth = Math.max(1, u * 0.6);
+  ctx.strokeRect(u * 3.4, u * 3.4, W - u * 6.8, H - u * 6.8);
+  const co = (cx, cy) => {
+    ctx.beginPath();
+    ctx.arc(cx, cy, u * 2.1, 0, Math.PI * 2);
+    ctx.moveTo(cx - u * 4.5, cy); ctx.lineTo(cx - u * 2.1, cy);
+    ctx.moveTo(cx + u * 2.1, cy); ctx.lineTo(cx + u * 4.5, cy);
+    ctx.moveTo(cx, cy - u * 4.5); ctx.lineTo(cx, cy - u * 2.1);
+    ctx.moveTo(cx, cy + u * 2.1); ctx.lineTo(cx, cy + u * 4.5);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy, u * 0.8, 0, Math.PI * 2);
+    ctx.fill();
+  };
+  const m = u * 5.5;
+  co(m, m); co(W - m, m); co(m, H - m); co(W - m, H - m);
+  const dia = (x, y, r) => { ctx.beginPath(); ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath(); ctx.fill(); };
+  dia(W / 2, m, u * 1.4); dia(W / 2, H - m, u * 1.4);
+  dia(m, H / 2, u * 1.4); dia(W - m, H / 2, u * 1.4);
+  const nonEmpty = lines.filter(l => l.trim()).length;
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  if (!nonEmpty) {
+    ctx.font = 'italic ' + fontPx + 'px ' + serif;
+    ctx.globalAlpha = 0.5;
+    ctx.fillText('\u2014 \u2014', W / 2, H / 2);
+    ctx.globalAlpha = 1;
+    return;
+  }
+  const lineH = fontPx * 1.25;
+  const startY = H / 2 - ((nonEmpty - 1) * lineH) / 2;
+  ctx.font = fontPx + 'px ' + serif;
+  lines.forEach((line, i) => {
+    if (!line.trim()) return;
+    ctx.fillText(line, W / 2, startY + i * lineH);
+  });
 }
 function stopAllSounds() { if (soundHold) { soundHold.pause(); soundHold = null; } }
 function playFrameSound(i) {
@@ -103,6 +172,11 @@ function tick(now) {
   const prevIdx = playIndex;
   while (acc >= stepMs) {
     acc -= stepMs;
+    const cur = frames[playIndex];
+    if (isTitleCard(cur)) {
+      acc = Math.min(acc + stepMs, titleMs(cur) || stepMs);
+      continue;
+    }
     if (playIndex < frames.length - 1) playIndex++;
     else if (!settings.loop) { pause(); return; }
     else playIndex = 0;
@@ -171,46 +245,51 @@ function applyProject(project) {
     }
     fpsTag.textContent = settings.fps + ' fps' + (settings.loop ? ' · loops' : '');
     const isFile = location.protocol === 'file:';
-    const loaded = [];
     (async () => {
-      for (const ref of refs) {
-        let url;
-        if (isFile) {
-          url = ref.imageData; // data URL, inlined by film-data.js
+      const imgs = new Array(refs.length).fill(null);
+      for (let i = 0; i < refs.length; i++) {
+        const ref = refs[i];
+        let f;
+        if (ref.type === 'title') {
+          f = { type: 'title', title: ref.title, titleSeconds: ref.titleSeconds };
+          imgs[i] = null;
+        } else if (isFile) {
+          const url = ref.imageData; // data URL, inlined by film-data.js
           if (!url) throw new Error('Missing image data for "' + ref.image + '".');
-          const f = { url };
-          if (ref.sound) {
-            if (!ref.sound.data) throw new Error('Missing sound data for "' + ref.sound.path + '".');
-            f.sound = ref.sound.data;
-          }
-          if (ref.hold) f.hold = true;
-          frames.push(f);
-          const im = new Image();
-          im.onload = () => loaded.push(im);
-          im.onerror = () => loaded.push(null);
-          im.src = url;
+          f = { url };
         } else {
           const imgRes = await fetch(ref.image);
           if (!imgRes.ok) throw new Error('Missing image "' + ref.image + '".');
-          const f = { url: URL.createObjectURL(await imgRes.blob()) };
-          if (ref.sound) {
+          f = { url: URL.createObjectURL(await imgRes.blob()) };
+        }
+        if (ref.sound) {
+          if (isFile) {
+            if (!ref.sound.data) throw new Error('Missing sound data for "' + ref.sound.path + '".');
+            f.sound = ref.sound.data;
+          } else {
             const sndRes = await fetch(ref.sound.path);
             if (!sndRes.ok) throw new Error('Missing sound "' + ref.sound.path + '".');
             f.sound = URL.createObjectURL(await sndRes.blob());
           }
-          if (ref.hold) f.hold = true;
-          frames.push(f);
+        }
+        if (ref.hold) f.hold = true;
+        frames.push(f);
+        if (f.url) {
           const im = new Image();
-          im.onload = () => loaded.push(im);
-          im.onerror = () => loaded.push(null);
+          im.onload = () => { imgs[i] = im; };
+          im.onerror = () => { imgs[i] = null; };
           im.src = f.url;
         }
       }
-      // Wait for all images to decode.
+      // Wait for all images to decode (title cards have no image; imgs[i] stays null).
       await new Promise(r => setTimeout(r, 50));
-      while (loaded.length < frames.length) await new Promise(r => setTimeout(r, 20));
-      loadedImgs = loaded.filter(Boolean);
-      if (!loadedImgs.length) { showMsg('Could not decode the frames.'); return; }
+      const wait = async () => {
+        await new Promise(r => setTimeout(r, 20));
+        if (frames.some((f, i) => f.url && (!imgs[i] || !imgs[i].complete))) await wait();
+      };
+      await wait();
+      loadedImgs = imgs;
+      if (!loadedImgs.some(Boolean)) { showMsg('Could not decode the frames.'); return; }
       msg.hidden = true;
       canvas.hidden = false;
       drawFrame(0);

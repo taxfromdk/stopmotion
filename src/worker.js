@@ -140,11 +140,17 @@ function validateProjectZip(bytes) {
     return 'Project has ' + project.frames.filter(r => r && r.sound && r.sound.path).length + ' sounds — the limit is ' + MAX_SOUNDS + '.';
   }
   // Every frame's image must exist and be a valid image; sounds must be valid.
+  // Title cards (type:"title") are text frames — they have no image file.
   for (const ref of project.frames) {
-    if (!ref || typeof ref.image !== 'string') return 'A frame is missing its image reference.';
-    if (!files[ref.image]) return 'Missing image file "' + ref.image + '".';
-    if (!isImageBytes(files[ref.image])) return 'File "' + ref.image + '" is not a valid image (JPEG/PNG/GIF/WebP).';
-    if (ref.sound) {
+    if (ref && ref.type === 'title') {
+      const okTitle = Array.isArray(ref.title) || typeof ref.title === 'string';
+      if (!okTitle) return 'A title card is missing its text.';
+    } else {
+      if (!ref || typeof ref.image !== 'string') return 'A frame is missing its image reference.';
+      if (!files[ref.image]) return 'Missing image file "' + ref.image + '".';
+      if (!isImageBytes(files[ref.image])) return 'File "' + ref.image + '" is not a valid image (JPEG/PNG/GIF/WebP).';
+    }
+    if (ref && ref.sound) {
       if (typeof ref.sound.path !== 'string' || !files[ref.sound.path]) {
         return 'Missing sound file "' + (ref.sound.path || '?') + '".';
       }
@@ -157,7 +163,7 @@ function validateProjectZip(bytes) {
   // data, and a short read-me alongside the referenced media.
   const expected = new Set(['project.json', 'player.html', 'film-data.js', 'README.txt']);
   for (const ref of project.frames) {
-    expected.add(ref.image);
+    if (ref.image) expected.add(ref.image);   // title cards have no image
     if (ref.sound && ref.sound.path) expected.add(ref.sound.path);
   }
   for (const name of Object.keys(files)) {
