@@ -11,5 +11,9 @@
       "binding": "BUCKET",
       "bucket_name": "stopmotion-projects"
     }
+  ],
+  "routes": [
+    { "pattern": "flic.dk", "custom_domain": true },
+    { "pattern": "www.flic.dk", "custom_domain": true }
   ]
 }
