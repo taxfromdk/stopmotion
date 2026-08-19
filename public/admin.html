@@ -91,6 +91,25 @@
   #empty { padding: 20px; text-align: center; }
   .tip { margin-top: 12px; }
 
+  /* ---- search + pagination ---- */
+  .list-toolbar { display: flex; align-items: center; gap: 12px; margin: 14px 0 10px; }
+  #search {
+    flex: 1; max-width: 420px; font: inherit; font-size: 14px; color: var(--text);
+    background: var(--panel); border: 1px solid #394152; border-radius: 8px; padding: 8px 12px;
+  }
+  #search:focus { outline: none; border-color: var(--accent); }
+  #result-count { white-space: nowrap; }
+  .pagination { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 14px 0 4px; }
+  .pagination button {
+    font: inherit; font-size: 13px; min-width: 34px; padding: 5px 10px;
+    background: var(--panel-2); border: 1px solid #394152; border-radius: 7px; cursor: pointer;
+  }
+  .pagination button:hover:not(:disabled) { border-color: var(--accent); }
+  .pagination button:disabled { opacity: .4; cursor: not-allowed; }
+  .pagination button.current { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .pagination .gap { color: var(--muted); padding: 0 4px; }
+  .pagination .page-info { color: var(--muted); font-size: 12.5px; margin-left: 8px; }
+
   /* ---- hover preview iframe ---- */
   #preview {
     position: fixed; z-index: 100; width: 340px; height: 260px;
@@ -122,6 +141,10 @@
 
   <section id="dashboard" hidden>
     <div id="stats"></div>
+    <div class="list-toolbar">
+      <input id="search" type="search" placeholder="Filter by code, country, IP, or user agent…" autocomplete="off" />
+      <span id="result-count" class="hint"></span>
+    </div>
     <div class="table-wrap">
       <table>
         <thead>
@@ -130,7 +153,9 @@
         <tbody id="works-body"></tbody>
       </table>
       <p id="empty" class="hint" hidden>No published works yet.</p>
+      <p id="no-match" class="hint" hidden>No works match your search.</p>
     </div>
+    <div id="pagination" class="pagination"></div>
     <p class="hint tip">Hover a row to preview the work in miniature (muted). Click a code to open the full viewer.</p>
   </section>
 </div>
@@ -145,7 +170,12 @@ const AUTH = USER + ':' + PASS;   // must match ADMIN_AUTH in src/worker.js
 const loginCard = $('#login-card'), dashboard = $('#dashboard'), authBar = $('#auth-bar');
 const statsEl = $('#stats'), tbody = $('#works-body'), emptyEl = $('#empty');
 const preview = $('#preview'), frame = $('#preview-frame');
+const searchEl = $('#search'), noMatchEl = $('#no-match'), resultCountEl = $('#result-count'), paginationEl = $('#pagination');
 let hoverTimer = null, hideTimer = null;
+let allWorks = [];          // full list from the API (newest first)
+let searchQuery = '';      // current filter text
+let currentPage = 1;       // 1-based
+const PAGE_SIZE = 25;      // works per page
 
 function formatBytes(n) {
   if (n < 1024) return n + ' B';
@@ -176,7 +206,8 @@ async function load() {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     renderStats(data.stats);
-    renderWorks(data.works);
+    allWorks = data.works;
+    renderWorks();
   } catch (err) {
     statsEl.innerHTML = '';
     const c = document.createElement('div');
@@ -202,10 +233,10 @@ async function deleteWork(code, row) {
       if (btn) btn.disabled = false;
       return;
     }
-    // Remove the row locally and refresh stats (the delete endpoint also
-    // returns updated stats).
-    row.remove();
-    emptyEl.hidden = tbody.children.length > 0;
+    // Remove from the local list and re-render (reloads stats too, so the
+    // counts stay accurate).
+    allWorks = allWorks.filter(w => w.code !== code);
+    renderWorks();
     load();
   } catch (err) {
     alert('Could not delete "' + code + '": ' + err.message);
@@ -233,14 +264,37 @@ function renderStats(s) {
     statsEl.appendChild(d);
   }
 }
-function renderWorks(works) {
+/* Filter the full list by the search query (code / country / IP / user agent). */
+function filteredWorks() {
+  const q = searchQuery.trim().toLowerCase();
+  if (!q) return allWorks;
+  return allWorks.filter(w => {
+    const hay = [w.code, w.country, w.ip, w.ua].filter(Boolean).join(' ').toLowerCase();
+    return hay.includes(q);
+  });
+}
+function renderWorks() {
+  const list = filteredWorks();
+  const total = list.length;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  if (currentPage > totalPages) currentPage = totalPages;
+  if (currentPage < 1) currentPage = 1;
+  const start = (currentPage - 1) * PAGE_SIZE;
+  const pageItems = list.slice(start, start + PAGE_SIZE);
+
   tbody.innerHTML = '';
-  emptyEl.hidden = works.length > 0;
-  works.forEach((w, i) => {
+  emptyEl.hidden = allWorks.length > 0;
+  noMatchEl.hidden = !(searchQuery.trim() && total === 0);
+  resultCountEl.textContent = total
+    ? 'Showing ' + (start + 1) + '–' + (start + pageItems.length) + ' of ' + total
+    : '';
+
+  const baseNum = start + 1;
+  pageItems.forEach((w, i) => {
     const tr = document.createElement('tr');
     tr.dataset.code = w.code;
     const tdNum = document.createElement('td');
-    tdNum.className = 'num'; tdNum.textContent = i + 1;
+    tdNum.className = 'num'; tdNum.textContent = baseNum + i;
     const tdCode = document.createElement('td');
     const a = document.createElement('a');
     a.href = '/' + w.code; a.target = '_blank'; a.textContent = w.code;
@@ -279,6 +333,44 @@ function renderWorks(works) {
     tr.addEventListener('mouseleave', scheduleHidePreview);
     tbody.appendChild(tr);
   });
+
+  renderPagination(totalPages);
+}
+
+/* Build the pagination control. Shows a window of page buttons with ellipses. */
+function renderPagination(totalPages) {
+  paginationEl.innerHTML = '';
+  if (totalPages <= 1) return;
+  const cur = currentPage;
+  const makeBtn = (label, page, opts = {}) => {
+    const b = document.createElement('button');
+    b.textContent = label;
+    if (opts.disabled) b.disabled = true;
+    if (opts.current) b.className = 'current';
+    if (opts.gap) { b.className = 'gap'; b.disabled = true; }
+    else if (!opts.disabled) b.addEventListener('click', () => { currentPage = page; renderWorks(); window.scrollTo({ top: 0, behavior: 'smooth' }); });
+    return b;
+  };
+  // First page
+  paginationEl.appendChild(makeBtn('«', 1, { disabled: cur === 1 }));
+  // Page number window around the current page
+  const pages = [];
+  pages.push(1);
+  let lo = Math.max(2, cur - 2), hi = Math.min(totalPages - 1, cur + 2);
+  if (lo > 2) pages.push('…');
+  for (let p = lo; p <= hi; p++) pages.push(p);
+  if (hi < totalPages - 1) pages.push('…');
+  pages.push(totalPages);
+  for (const p of pages) {
+    if (p === '…') paginationEl.appendChild(makeBtn('…', cur, { gap: true, disabled: true }));
+    else paginationEl.appendChild(makeBtn(String(p), p, { current: p === cur }));
+  }
+  // Last page
+  paginationEl.appendChild(makeBtn('»', totalPages, { disabled: cur === totalPages }));
+  const info = document.createElement('span');
+  info.className = 'page-info';
+  info.textContent = 'Page ' + cur + ' of ' + totalPages;
+  paginationEl.appendChild(info);
 }
 
 /* ---------- hover preview ---------- */
@@ -339,6 +431,12 @@ $('#password').addEventListener('keydown', e => { if (e.key === 'Enter') signIn(
 $('#login').addEventListener('keydown', e => { if (e.key === 'Enter') $('#password').focus(); });
 $('#refresh-btn').addEventListener('click', load);
 $('#logout-btn').addEventListener('click', signOut);
+// Search: filter as you type, and reset to the first page on each change.
+searchEl.addEventListener('input', () => {
+  searchQuery = searchEl.value;
+  currentPage = 1;
+  renderWorks();
+});
 
 if (sessionStorage.getItem('sm-admin') === '1') showAuthed();
 })();
