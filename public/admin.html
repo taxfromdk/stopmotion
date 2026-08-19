@@ -26,6 +26,8 @@
   header { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
   h1 { font-size: 20px; margin: 0; }
   h1 .sub { color: var(--muted); font-size: 14px; font-weight: 400; margin-left: 8px; }
+  h1 .home-link { color: var(--accent); font-size: 13px; font-weight: 400; margin-left: 10px; text-decoration: none; }
+  h1 .home-link:hover { text-decoration: underline; }
   button {
     font: inherit; font-size: 14px; color: var(--text);
     background: var(--panel-2); border: 1px solid #394152;
@@ -77,6 +79,14 @@
   tbody tr:last-child td { border-bottom: none; }
   td a { color: var(--accent); text-decoration: none; font-weight: 600; }
   td a:hover { text-decoration: underline; }
+  td.del-cell { text-align: right; }
+  .del-btn {
+    background: transparent; border: 1px solid #5a2b2b; color: #ffb3b3;
+    border-radius: 6px; padding: 2px 9px; font-size: 13px; line-height: 18px;
+    cursor: pointer; opacity: .55;
+  }
+  .del-btn:hover { background: var(--danger); color: #fff; border-color: transparent; opacity: 1; }
+  .del-btn[disabled] { opacity: .3; cursor: wait; }
   .num { color: var(--muted); font-variant-numeric: tabular-nums; }
   #empty { padding: 20px; text-align: center; }
   .tip { margin-top: 12px; }
@@ -94,7 +104,7 @@
 <body>
 <div id="wrap">
   <header>
-    <h1>&#128736; Admin<span class="sub">flic.dk</span></h1>
+    <h1>&#128736; Admin<span class="sub">flic.dk</span><a class="home-link" href="/" title="Open flic.dk">&#8592; flic.dk</a></h1>
     <div id="auth-bar" hidden style="display:flex;gap:8px;">
       <button id="refresh-btn" title="Reload works and stats">&#8635; Refresh</button>
       <button id="logout-btn">Sign out</button>
@@ -104,7 +114,7 @@
   <section id="login-card">
     <h2>Sign in</h2>
     <p class="hint" style="margin:0;">Staff only.</p>
-    <div class="row"><input id="login" placeholder="Login" autocomplete="username" /></div>
+    <div class="row"><input id="login" placeholder="Login" autocomplete="username" autofocus /></div>
     <div class="row"><input id="password" type="password" placeholder="Password" autocomplete="current-password" /></div>
     <button id="login-btn">Sign in</button>
     <p id="login-error" hidden>Wrong login or password.</p>
@@ -115,7 +125,7 @@
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>#</th><th>Code</th><th>Size</th><th>From</th><th>Published</th></tr>
+          <tr><th>#</th><th>Code</th><th>Size</th><th>From</th><th>Published</th><th></th></tr>
         </thead>
         <tbody id="works-body"></tbody>
       </table>
@@ -175,6 +185,33 @@ async function load() {
     statsEl.appendChild(c);
   }
 }
+/* Delete a work (its zip + sidecar metadata) from the bucket. */
+async function deleteWork(code, row) {
+  if (!confirm('Delete work "' + code + "? This can't be undone.")) return;
+  const btn = row.querySelector('.del-btn');
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('/api/admin/delete/' + encodeURIComponent(code), {
+      method: 'POST',
+      headers: { 'x-admin-auth': AUTH },
+    });
+    if (!res.ok) {
+      let detail = 'HTTP ' + res.status;
+      try { const d = await res.json(); if (d && d.error) detail = d.error; } catch (e) { /* keep default */ }
+      alert('Could not delete "' + code + '": ' + detail);
+      if (btn) btn.disabled = false;
+      return;
+    }
+    // Remove the row locally and refresh stats (the delete endpoint also
+    // returns updated stats).
+    row.remove();
+    emptyEl.hidden = tbody.children.length > 0;
+    load();
+  } catch (err) {
+    alert('Could not delete "' + code + '": ' + err.message);
+    if (btn) btn.disabled = false;
+  }
+}
 function renderStats(s) {
   const cards = [
     ['Works', String(s.total)],
@@ -231,7 +268,13 @@ function renderWorks(works) {
     const tdDate = document.createElement('td');
     tdDate.className = 'num'; tdDate.textContent = timeAgo(w.updated);
     tdDate.title = new Date(w.updated).toLocaleString();
-    tr.append(tdNum, tdCode, tdSize, tdFrom, tdDate);
+    const tdDel = document.createElement('td');
+    tdDel.className = 'del-cell';
+    const delBtn = document.createElement('button');
+    delBtn.className = 'del-btn'; delBtn.title = 'Delete this work'; delBtn.textContent = '\u00d7';
+    delBtn.addEventListener('click', (e) => { e.stopPropagation(); deleteWork(w.code, tr); });
+    tdDel.appendChild(delBtn);
+    tr.append(tdNum, tdCode, tdSize, tdFrom, tdDate, tdDel);
     tr.addEventListener('mouseenter', () => schedulePreview(w.code, tr));
     tr.addEventListener('mouseleave', scheduleHidePreview);
     tbody.appendChild(tr);

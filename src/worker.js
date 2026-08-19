@@ -345,6 +345,17 @@ export default {
       return handleAdminSummary(env);
     }
 
+    /* POST /api/admin/delete/{code} — admin-only: delete a work (zip + sidecar) */
+    const delMatch = path.match(new RegExp('^/api/admin/delete/([A-Za-z]{' + CODE_LEN + '})$'));
+    if (delMatch && method === 'POST') {
+      if (request.headers.get('x-admin-auth') !== ADMIN_AUTH) {
+        return json({ error: 'Unauthorized.' }, 401);
+      }
+      const code = normalizeCode(delMatch[1]);
+      await env.BUCKET.delete([keyFor(code), metaKeyFor(code)]);
+      return json({ deleted: code });
+    }
+
     /* GET /admin — admin page. Must come before the /{code} route, since
        "admin" is a valid 5-letter code shape. */
     if (path === '/admin' && (method === 'GET' || method === 'HEAD')) {
