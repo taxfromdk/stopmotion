@@ -253,7 +253,8 @@ async function readWorkMeta(env, code) {
   try {
     const obj = await env.BUCKET.get(metaKeyFor(code));
     if (!obj) return { ip: '', origin: '', ua: '' };
-    const meta = JSON.parse(new TextDecoder().decode(obj.body));
+    const text = await obj.text();   // R2 Object.text() decodes for us
+    const meta = JSON.parse(text);
     return { ip: meta.ip || '', origin: meta.origin || '', ua: meta.ua || '' };
   } catch (err) {
     return { ip: '', origin: '', ua: '' };
