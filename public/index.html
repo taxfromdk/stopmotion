@@ -165,7 +165,39 @@
     flex: 1; min-width: 0; font: inherit; font-size: 13.5px; color: var(--accent);
     background: var(--bg); border: 1px solid #394152; border-radius: 8px; padding: 8px 10px;
   }
-</style>
+  #pub-code {
+    font: 600 40px/1.1 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    letter-spacing: .5em; color: var(--text); background: var(--bg);
+    border: 1px solid #394152; border-radius: 12px; padding: 14px 0;
+    text-align: center; user-select: all;
+  }
+  #pub-code-row { display: flex; gap: 8px; margin-bottom: 14px; }
+  #pub-code-copy { align-self: stretch; }
+
+  /* ---- load-code modal (same chrome as the publish modal) ---- */
+  #load-code-overlay {
+    position: fixed; inset: 0; z-index: 50; background: rgba(5, 7, 10, .62);
+    display: flex; align-items: center; justify-content: center; padding: 16px;
+  }
+  #load-code-overlay[hidden] { display: none; }
+  #load-code-modal {
+    background: var(--panel); border: 1px solid #394152; border-radius: 16px;
+    padding: 24px 26px; max-width: 420px; width: 100%; text-align: center;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, .5);
+  }
+  #load-code-modal h2 { margin: 0 0 8px; font-size: 20px; }
+  #load-code-modal p { margin: 0 0 14px; color: var(--muted); font-size: 14px; line-height: 1.5; }
+  #load-code-modal code { background: var(--bg); border: 1px solid #394152; border-radius: 6px; padding: 1px 6px; font-size: 13px; }
+  .load-code-row { display: flex; gap: 8px; margin-bottom: 14px; }
+  #load-code-input {
+    flex: 1; min-width: 0; font: 600 20px/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    letter-spacing: .35em; text-transform: lowercase; color: var(--text);
+    background: var(--bg); border: 1px solid #394152; border-radius: 8px; padding: 10px 12px;
+    text-align: center;
+  }
+  #load-code-input:focus { border-color: var(--accent); outline: none; }
+  #load-code-go { background: #2e7d5b; border-color: #3d9970; font-weight: 600; }
+  #load-code-go:hover:not(:disabled) { background: #379268; }
 </head>
 <body>
 <input type="file" id="project-file" accept=".zip,application/zip,application/x-zip-compressed" hidden />
@@ -175,6 +207,7 @@
     <span id="storage-info" style="color:var(--muted);font-size:13px;"></span>
     <span id="app-version" title="App version" style="color:var(--muted);font-size:12.5px;font-variant-numeric:tabular-nums;"></span>
     <button id="publish-btn" title="Publish your work on the web — anyone with the link will be able to see it. Get a shareable link.">&#128640; Publish</button>
+    <button id="load-code-btn" title="Load a shared work from its 5-letter code (e.g. qzmnx)">&#128194; Load flic&#8230;</button>
     <button id="save-project-btn" title="Download the whole project (structure + images + sounds) as a .zip file">&#128190; Download project</button>
     <button id="load-project-btn" title="Upload a previously downloaded .zip project file">&#128194; Upload project&#8230;</button>
   </div>
@@ -227,12 +260,27 @@
 <div id="pub-overlay" hidden>
   <div id="pub-modal" role="dialog" aria-modal="true" aria-labelledby="pub-title">
     <h2 id="pub-title">&#127881; Your work is live!</h2>
-    <p>Anyone with this link can watch your work:</p>
+    <p>Anyone with the code can watch your work:</p>
+    <div id="pub-code-row">
+      <div id="pub-code"></div>
+      <button id="pub-code-copy" title="Copy the 5-letter code">Copy code</button>
+    </div>
     <div class="pub-row">
       <input id="pub-link" readonly />
       <button id="pub-copy">Copy</button>
     </div>
     <button id="pub-close">Done</button>
+  </div>
+</div>
+<div id="load-code-overlay" hidden>
+  <div id="load-code-modal" role="dialog" aria-modal="true" aria-labelledby="load-code-title">
+    <h2 id="load-code-title">&#128194; Load a flic</h2>
+    <p>Type the 5-letter code of a shared work (e.g. <code>qzmnx</code>) to load it into your editor. You can then change it and publish your own version.</p>
+    <div class="load-code-row">
+      <input id="load-code-input" maxlength="5" placeholder="e.g. qzmnx" autocomplete="off" spellcheck="false" />
+      <button id="load-code-go">Load</button>
+      <button id="load-code-cancel" title="Cancel">Cancel</button>
+    </div>
   </div>
 </div>
 <script src="zip-codec.js"></script>
@@ -289,7 +337,7 @@ const list = $('#frame-list'), statusEl = $('#status');
 const captureBtn = $('#capture-btn'), playBtn = $('#play-btn');
 const ghostToggle = $('#ghost-toggle');
 const loopToggle = $('#loop-toggle');
-const pubOverlay = $('#pub-overlay'), pubLink = $('#pub-link');
+const pubOverlay = $('#pub-overlay'), pubLink = $('#pub-link'), pubCode = $('#pub-code');
 
 /* ---------- helpers ---------- */
 function uid() {
@@ -997,6 +1045,45 @@ async function loadFork(code) {
   }
 }
 
+/* Load flic: type a 5-letter code to pull a shared work into the editor.
+   Reuses loadFork (which fetches /api/project/{code} and applies it). */
+const loadCodeOverlay = $('#load-code-overlay');
+const loadCodeInput = $('#load-code-input');
+const loadCodeGo = $('#load-code-go');
+function loadFromCode(code) {
+  code = String(code || '').trim().toLowerCase();
+  if (!code) {
+    loadCodeInput.focus();
+    return;
+  }
+  if (!/^[a-z]{5}$/.test(code)) {
+    setStatus('Codes are exactly 5 letters (a–z).', true);
+    loadCodeInput.focus();
+    return;
+  }
+  closeLoadCodeModal();
+  loadFork(code);
+}
+function openLoadCodeModal() {
+  loadCodeInput.value = '';
+  loadCodeOverlay.hidden = false;
+  loadCodeInput.focus();
+}
+function closeLoadCodeModal() {
+  loadCodeOverlay.hidden = true;
+}
+$('#load-code-btn').addEventListener('click', openLoadCodeModal);
+$('#load-code-cancel').addEventListener('click', closeLoadCodeModal);
+loadCodeOverlay.addEventListener('click', e => { if (e.target === loadCodeOverlay) closeLoadCodeModal(); });
+loadCodeInput.addEventListener('input', () => {
+  loadCodeInput.value = loadCodeInput.value.toLowerCase().replace(/[^a-z]/g, '').slice(0, 5);
+});
+loadCodeInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') loadFromCode(loadCodeInput.value);
+  else if (e.key === 'Escape') closeLoadCodeModal();
+});
+loadCodeGo.addEventListener('click', () => loadFromCode(loadCodeInput.value));
+
 /* ---------- publishing ---------- */
 async function publishProject() {
   if (!frames.length) { setStatus('Capture some frames before publishing.', true); return; }
@@ -1018,8 +1105,9 @@ async function publishProject() {
     try { data = await res.json(); } catch (e) { /* non-JSON response */ }
     if (!res.ok || !data.code) throw new Error((data && data.error) || ('HTTP ' + res.status));
     pubLink.value = data.url;
+    pubCode.textContent = data.code;
     pubOverlay.hidden = false;
-    setStatus('Published as ' + data.code + ' (' + formatBytes(data.size) + '). Share the link!');
+    setStatus('Published as ' + data.code + ' (' + formatBytes(data.size) + '). Share the code!');
   } catch (err) {
     if (err instanceof TypeError) setStatus('Publishing is only available on the deployed site — open it at your Cloudflare URL (not locally or on file://).', true);
     else setStatus('Could not publish: ' + err.message, true);
@@ -1045,6 +1133,21 @@ $('#pub-copy').addEventListener('click', async () => {
   }
   btn.textContent = 'Copied!';
   setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+});
+$('#pub-code-copy').addEventListener('click', async () => {
+  const btn = $('#pub-code-copy');
+  try {
+    await navigator.clipboard.writeText(pubCode.textContent);
+  } catch (err) {
+    const r = document.createRange();
+    r.selectNodeContents(pubCode);
+    const sel = window.getSelection();
+    sel.removeAllRanges(); sel.addRange(r);
+    document.execCommand('copy');
+    sel.removeAllRanges();
+  }
+  btn.textContent = 'Copied!';
+  setTimeout(() => { btn.textContent = 'Copy code'; }, 1500);
 });
 
 /* ---------- playback ---------- */
