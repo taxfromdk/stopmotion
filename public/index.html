@@ -458,7 +458,7 @@ function setTitleText(frameId, text) {
 function setTitleDuration(frameId, seconds) {
   const f = frames.find(x => x.id === frameId);
   if (!f || f.type !== 'title') return;
-  f.titleSeconds = Math.min(TITLE_MAX_SECONDS, Math.max(0, Math.round(+seconds)));
+  f.titleSeconds = Math.min(TITLE_MAX_SECONDS, Math.max(0, +seconds));
   persist();
 }
 function capture() {
