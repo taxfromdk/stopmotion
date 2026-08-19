@@ -698,33 +698,61 @@ list.addEventListener('dragend', () => {
 });
 
 /* Touch reorder: HTML5 drag events don't fire for touch input (Android / iPad),
-   so long-press a frame then drag it across the strip to reorder. A short tap
-   still selects the frame (handled by the click listener above). */
-let touchDrag = null;      // { id, timer, li } while arming/moving a touch drag
+   so we handle it manually. Touching a frame and dragging it horizontally
+   (or long-pressing it) reorders it across the strip; a plain tap still
+   selects the frame. We preventDefault on touchmove so the strip never
+   scrolls while a frame is being dragged. */
+let touchDrag = null;      // { id, li, timer, sx, sy, armed, moved }
 let suppressClickUntil = 0; // timestamps; a click before this is ignored (was a drag)
+const DRAG_ARM_PX = 14;     // horizontal intent that arms a drag
+const DRAG_ARM_MS = 320;    // long-press that arms a drag
+function armTouchDrag() {
+  if (!touchDrag || touchDrag.armed) return;
+  touchDrag.armed = true;
+  touchDrag.li.classList.add('dragging');
+  if (touchDrag.timer) { clearTimeout(touchDrag.timer); touchDrag.timer = null; }
+  try { if (navigator.vibrate) navigator.vibrate(10); } catch (err) { /* ignore */ }
+}
 function commitDragOrder() {
   const ids = [...list.querySelectorAll('li[data-id]')].map(li => li.dataset.id);
   frames.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
   persist(); renderFrames(); updateGhost();
 }
+function endTouchDrag(commit) {
+  if (!touchDrag) return;
+  if (touchDrag.timer) { clearTimeout(touchDrag.timer); touchDrag.timer = null; }
+  const li = touchDrag.li;
+  const wasDragging = li && li.classList.contains('dragging');
+  if (li) li.classList.remove('dragging');
+  touchDrag = null;
+  if (wasDragging && commit) {
+    suppressClickUntil = Date.now() + 450;
+    commitDragOrder();
+  }
+}
 list.addEventListener('touchstart', e => {
   const t = e.touches[0];
   const li = e.target.closest && e.target.closest('li[data-id]');
   if (!li) return;
-  touchDrag = { id: li.dataset.id, timer: null, li };
-  touchDrag.timer = setTimeout(() => {
-    li.classList.add('dragging');
-    try { if (navigator.vibrate) navigator.vibrate(10); } catch (err) { /* ignore */ }
-    touchDrag.timer = null;      // armed — a move now drags
-  }, 320);
+  touchDrag = { id: li.dataset.id, li, timer: null, sx: t.clientX, sy: t.clientY, armed: false, moved: false };
+  touchDrag.timer = setTimeout(armTouchDrag, DRAG_ARM_MS);
 }, { passive: true });
 list.addEventListener('touchmove', e => {
   if (!touchDrag) return;
-  if (touchDrag.timer) clearTimeout(touchDrag.timer);
-  const li = touchDrag.li;
-  if (!li || !li.classList.contains('dragging')) return;  // not armed yet
-  e.preventDefault();                                       // stop the strip from scrolling
   const t = e.touches[0];
+  const dx = t.clientX - touchDrag.sx;
+  const dy = t.clientY - touchDrag.sy;
+  const horiz = Math.abs(dx) > Math.abs(dy);
+  if (!touchDrag.armed) {
+    // Arm only on a clear horizontal intent; a vertical gesture leaves the
+    // strip free to scroll (so we don't preventDefault here).
+    if (!horiz || Math.abs(dx) < DRAG_ARM_PX) return;
+    armTouchDrag();
+  }
+  if (!touchDrag.armed) return;
+  touchDrag.moved = true;
+  e.preventDefault();                                      // stop the strip from scrolling
+  const li = touchDrag.li;
   let best = { offset: -Infinity, el: null };
   for (const other of list.querySelectorAll('li[data-id]:not(.dragging)')) {
     const box = other.getBoundingClientRect();
@@ -733,25 +761,8 @@ list.addEventListener('touchmove', e => {
   }
   if (best.el) list.insertBefore(li, best.el); else list.appendChild(li);
 }, { passive: false });
-list.addEventListener('touchend', () => {
-  if (!touchDrag) return;
-  if (touchDrag.timer) clearTimeout(touchDrag.timer);
-  const li = touchDrag.li;
-  const wasDragging = li && li.classList.contains('dragging');
-  if (li) li.classList.remove('dragging');
-  touchDrag = null;
-  if (wasDragging) {
-    suppressClickUntil = Date.now() + 450;
-    commitDragOrder();
-  }
-});
-list.addEventListener('touchcancel', () => {
-  if (!touchDrag) return;
-  if (touchDrag.timer) clearTimeout(touchDrag.timer);
-  const li = touchDrag.li;
-  if (li) li.classList.remove('dragging');
-  touchDrag = null;
-});
+list.addEventListener('touchend', () => endTouchDrag(true));
+list.addEventListener('touchcancel', () => endTouchDrag(false));
 // Swallow the click that follows a touch-drag so it doesn't select the frame.
 list.addEventListener('click', e => {
   if (Date.now() < suppressClickUntil) {
