@@ -253,9 +253,12 @@ async function listAllWorks(env) {
       if (!m) continue;
       const work = { code: m[1], size: o.size, updated: o.uploaded, ip: '', origin: '', ua: '' };
       // Read back the publishing context (ip/origin/ua) stored as R2 HTTP
-      // metadata at publish time. Best-effort: older works have none.
+      // metadata at publish time. Use a range-limited get (just the first
+      // byte) so we fetch the metadata WITHOUT downloading each object's
+      // body — a full get pulls the whole work (up to 50 MB) and would hang
+      // this endpoint. Best-effort: older works have no metadata.
       try {
-        const obj = await env.BUCKET.get(o.key);
+        const obj = await env.BUCKET.get(o.key, { range: { offset: 0, count: 1 } });
         if (obj) {
           const meta = (obj && obj.httpMetadata && obj.httpMetadata.customMetadata) || {};
           work.ip = meta.ip || '';
