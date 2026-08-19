@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Deploy to Cloudflare with the app version stamped to the current git commit.
+#
+# The editor is a static asset, so it can't read the git history at runtime.
+# We stamp the short commit id into the APP_VERSION constant in
+# public/index.html right before deploying. Because wrangler re-uploads any
+# changed asset, this guarantees the deployed header shows the exact commit
+# that produced the live build.
+#
+# Usage: ./deploy.sh
+set -euo pipefail
+
+cd "$(dirname "$0")"
+
+TARGET="public/index.html"
+CONST_LINE="const APP_VERSION = "
+
+# --- 1. Stamp the version ----------------------------------------------
+# Short commit id, e.g. "10f673a".
+VERSION="$(git rev-parse --short HEAD)"
+
+# Refuse to stamp the tree if the working copy is dirty (the version must
+# match what actually gets deployed). Untracked files are fine.
+if [ -n "$(git status --porcelain)" ]; then
+  echo "Error: working tree is dirty — commit your changes first." >&2
+  echo "Uncommitted changes:" >&2
+  git status --porcelain >&2
+  exit 1
+fi
+
+# --- 2. Update the APP_VERSION constant in index.html -------------------
+if ! grep -q "$CONST_LINE" "$TARGET"; then
+  echo "Error: could not find '$CONST_LINE' in $TARGET." >&2
+  exit 1
+fi
+
+# Replace whatever value is currently set with the commit id (macOS/BSD and
+# GNU sed compatible).
+if sed --version >/dev/null 2>&1; then
+  # GNU sed
+  sed -i.bak -E "s/^${CONST_LINE}.*$/${CONST_LINE}'${VERSION}';/" "$TARGET"
+else
+  # BSD sed (macOS)
+  sed -i.bak -E "s/^${CONST_LINE}.*$/${CONST_LINE}'${VERSION}';/" "$TARGET"
+fi
+rm -f "${TARGET}.bak"
+
+echo "Stamped APP_VERSION = '${VERSION}' in ${TARGET}"
+
+# --- 3. Deploy ----------------------------------------------------------
+npx wrangler deploy "$@"

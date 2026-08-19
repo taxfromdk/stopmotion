@@ -572,7 +572,7 @@ fpsSlider.value = settings.fps;
 fpsVal.textContent = settings.fps;
 ghostToggle.checked = settings.ghost;
 loopToggle.checked = settings.loop !== false;
-$('#app-version').textContent = 'v' + APP_VERSION;
+$('#app-version').textContent = APP_VERSION;
 renderFrames(); updateGhost(); startCamera();
 /* Forking: /?fork=qzmnx loads a shared work into the editor */
 const forkCode = new URLSearchParams(location.search).get('fork');
