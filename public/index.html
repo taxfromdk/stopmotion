@@ -32,9 +32,9 @@
   }
   header h1 { font-size: 18px; margin: 0; letter-spacing: .3px; }
   .header-right { display: flex; align-items: center; gap: 10px; }
-  #capture-bar, #playback-bar {
-    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-    padding: 8px 16px; border-bottom: 1px solid #2e3440; background: var(--panel);
+  #ctrl-bar {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 7px 16px; border-bottom: 1px solid #2e3440; background: var(--panel);
   }
   main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 
@@ -75,8 +75,15 @@
   input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; }
   input[type="range"] { accent-color: var(--accent); width: 110px; }
   .fps-val { min-width: 42px; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
-  #status { font-size: 13.5px; color: var(--muted); min-width: 200px; }
+  #status { font-size: 13px; color: var(--muted); min-width: 160px; }
   #status.error { color: var(--danger); }
+  /* Compact controls in the single top control bar */
+  #ctrl-bar button { padding: 6px 10px; font-size: 13.5px; }
+  #ctrl-bar #capture-btn { padding: 6px 14px; }
+  #ctrl-bar .group { padding: 4px 8px; gap: 6px; }
+  #ctrl-bar .group input[type="range"] { width: 96px; }
+  #ctrl-bar .group .fps-label { font-size: 12px; }
+  #ctrl-bar label.ghost-label { font-size: 13px; gap: 5px; }
 
   /* ---- reel (bottom strip) ---- */
   #frames-panel {
@@ -152,14 +159,12 @@
     <button id="load-project-btn" title="Upload a previously downloaded .zip project file">&#128194; Upload project&#8230;</button>
   </div>
 </header>
-<div id="capture-bar">
-  <button id="capture-btn">&#128247; Capture frame</button>
+<div id="ctrl-bar">
+  <button id="capture-btn">&#128247; Capture</button>
   <button id="flip-cam" title="Switch to the next camera" disabled>&#8634; Flip camera</button>
   <label class="ghost-label" title="Overlay the last captured frame at 50% opacity so you can align objects between shots">
-    <input type="checkbox" id="ghost-toggle" /> Ghost previous (50%)
+    <input type="checkbox" id="ghost-toggle" /> Ghost prev.
   </label>
-</div>
-<div id="playback-bar">
   <div class="group">
     <button id="play-btn">&#9654; Play</button>
     <button id="step-back" title="Previous frame">&#9198;</button>
@@ -167,7 +172,7 @@
     <button id="cam-btn" title="Back to live camera view">&#128247; Live</button>
   </div>
   <div class="group">
-    <span style="font-size:13px;color:var(--muted);">FPS</span>
+    <span class="fps-label" style="color:var(--muted);">FPS</span>
     <input type="range" id="fps" min="1" max="24" step="1" />
     <span class="fps-val" id="fps-val"></span>
   </div>
