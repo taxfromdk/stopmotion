@@ -1,0 +1,53 @@
+If a flic has been published the uuid need to be displayed somewhere.
+Add a load flic button that can recieve a code.
+
+Can we count visits to the published page
+I want version on a header that is present on all pages
+
+I need an about page describing my motivation. Im testing Qwen3.8-27b on a RTX5090 and use this as a test project. My github page is github.com/taxfromdk/stopmotion
+Also a link to collect feedback, google forms
+
+---DONE---
+
+Ditch the word list, use letters a-z instead for a 5 letter code. Disregard uppercase and lowercase so kids can use it easily
+add an admin page with login:password (flic:stopmotion) to list works (newest first) and stats on usage. Works will be played back in a hovering iframe that loads the viewer, so I can see the work in miniature
+I acquired the domain flic.dk, please integrate it 
+Rephrase save and load to save download project and upload project. 
+Put an explicit note when publishing that "anyone will be able to see it" 
+Only allow publish if work is changed from starting point. Initially an empty project cant be published, and a forked project can not be published if it is not changed.
+Limit jpg size to max HD resolution
+Flip cameras if multiple cameras available
+Compress zip
+Ensure images are images on upload and json is sane. Zip can contain no other.
+Embed player in zipfile that can play the contents if one should dig up the zipfile in 15 years
+How can we make sure the storage newer grow beyond free tier
+Can the backend store information about the publisher. E.g the wan IP of the uploader so we can list e.g: "xx.xx.xx.xx - Copenhagen, Denmark" after each published flic. Time and Size of upload could also be relevant. It would also be interresting to know the creation time of each asset (image/audio) to know how much time has been spent on the flic.
+We dont need the retry camera button any more
+Rename stopmotion studio to flic.dk
+Can the "Capture frame" block be embedded tin the topbar so the camera view is not obstructed
+Lets cap at 500 images and 50 sounds. Also cap audio length to 10 seconds. Check both in UI and when publishing. 
+Also move the remaining controls from the box on top of the image to the topbar. Arrange them nicely
+A new kind of frame must be created like an silent film sign. A black frame with ornaments in the sides and corners. It will have a centered white textfield with an oldfashioned font, font size is fixed and limited to three lines of 30 chars max and a slider for how long it should be shown 1/fps to 10 seconds. It can be mixed with other frames and sound can be added to it. It can be used to build story. 
+please commit push and deploy
+Loose the ornaments. Just white text on black. 
+Change "Flip camera" to "Next camera"
+Loose the fps selector. Just use 8 fps always
+Let signs show same period as regular frames. Sounds can be added and set to hold to stretch them in time.
+Signs does not need a time slider any more.
+We need a favicon. Make one of a film clapper
+Can you place the old index.html (24hours old) in the root of the repo, so I can load it and save an film from localstorage on a tablet.
+On admin page let curser focus on user and tab to password next. 
+Link in admin panel topbar to root page
+I need a delete button in the admin list
+I need dynamic js pagination on the admin page and a search bar to filter on codes/origin/ip in list.
+
+---WONT---
+Subprojects - ability to insert published works in works in a special frame.
+
+Ad another tickbox like "ghost preview" called "difference" just below. It will show an absdiff * 4 of the current and previous frame. Only one of the modes can be visible at a time and they are never shown during playback. It will be helpfull when 
+
+make a button that jumps to a random flic
+
+It would be awesome if the letter codes were shorter and only grew in size if needed
+
+Make a parent page that lists all works from that IP, that will allow teachers and parents to collect the works easily
