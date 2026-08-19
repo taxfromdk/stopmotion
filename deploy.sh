@@ -19,12 +19,12 @@ CONST_LINE="const APP_VERSION = "
 # Short commit id, e.g. "10f673a".
 VERSION="$(git rev-parse --short HEAD)"
 
-# Refuse to stamp the tree if the working copy is dirty (the version must
-# match what actually gets deployed). Untracked files are fine.
-if [ -n "$(git status --porcelain)" ]; then
-  echo "Error: working tree is dirty — commit your changes first." >&2
-  echo "Uncommitted changes:" >&2
-  git status --porcelain >&2
+# Refuse to stamp if there are UNCOMMITTED TRACKED changes (the version must
+# match what actually gets deployed). Untracked files (e.g. local scratch
+# files) are fine — they don't affect the deployed assets.
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+  echo "Error: working tree has uncommitted changes — commit them first." >&2
+  git status --porcelain --untracked-files=no >&2
   exit 1
 fi
 
