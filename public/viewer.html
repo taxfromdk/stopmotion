@@ -262,17 +262,12 @@ bigplay.addEventListener('click', toggle);
       return;
     }
     // Show where the work was made from (sent by the worker as X-Work-* headers).
-    const workOrigin = res.headers.get('x-work-origin') || '';
+    const workCountry = res.headers.get('x-work-country') || '';
     const workIp = res.headers.get('x-work-ip') || '';
     const workUa = res.headers.get('x-work-ua') || '';
-    if (workOrigin || workIp) {
-      const parts = [];
-      if (workOrigin) {
-        try { parts.push(new URL(workOrigin).host); } catch (e) { parts.push(workOrigin); }
-      }
-      if (workIp) parts.push(workIp);
-      originEl.textContent = 'Made from ' + parts.join(' · ') + (workUa ? ' · ' + workUa : '');
-      originEl.title = (workUa ? workUa : '') + (workOrigin ? '\n' + workOrigin : '');
+    if (workCountry || workIp) {
+      originEl.textContent = 'Made in ' + (workCountry ? workCountry : '—') + (workIp ? ' · ' + workIp : '');
+      originEl.title = [workUa && workUa, workCountry && 'Country: ' + workCountry, workIp && 'IP: ' + workIp].filter(Boolean).join('\n');
       originEl.hidden = false;
     }
     const files = ZipCodec.readZip(new Uint8Array(await res.arrayBuffer()));

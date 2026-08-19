@@ -142,6 +142,13 @@ function formatBytes(n) {
   if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
   return (n / 1048576).toFixed(2) + ' MB';
 }
+/* Two-letter country code -> regional-indicator emoji flag (e.g. DK -> 🇩🇰). */
+function countryFlag(cc) {
+  if (!cc || cc.length !== 2) return '';
+  const base = 0x1F1E6;
+  return String.fromCharCode(base + cc.toUpperCase().charCodeAt(0) - 65,
+                              base + cc.toUpperCase().charCodeAt(1) - 65);
+}
 function timeAgo(iso) {
   const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
   if (s < 60) return 'just now';
@@ -205,14 +212,16 @@ function renderWorks(works) {
     tdSize.className = 'num'; tdSize.textContent = formatBytes(w.size);
     const tdFrom = document.createElement('td');
     tdFrom.className = 'from';
-    const originText = (w.origin && w.origin !== w.code) ? w.origin : '';
-    const originLine = document.createElement('span');
-    originLine.className = 'from-origin';
-    originLine.textContent = originText || '—';
-    originLine.title = originText || '';
-    tdFrom.appendChild(originLine);
-    if (w.ip || w.ua) {
-      const detail = [w.ip, w.ua].filter(Boolean).join(' · ');
+    // Lead with the geographic location (country, from Cloudflare cf-ipcountry).
+    const flag = countryFlag(w.country);
+    const mainText = w.country ? (flag + ' ' + w.country) : (w.ip || '—');
+    const mainLine = document.createElement('span');
+    mainLine.className = 'from-origin';
+    mainLine.textContent = mainText;
+    mainLine.title = w.ip ? 'IP ' + w.ip : '';
+    tdFrom.appendChild(mainLine);
+    const detail = [w.ip, w.ua].filter(Boolean).join(' · ');
+    if (detail) {
       const detailLine = document.createElement('span');
       detailLine.className = 'from-ua';
       detailLine.textContent = detail;

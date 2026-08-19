@@ -213,6 +213,7 @@ async function handlePublish(request, env) {
   // browser fetch). Stored as a sidecar object (projects/{code}.meta.json)
   // because R2 does not persist arbitrary customMetadata on objects.
   const pubIp = request.headers.get('cf-connecting-ip') || '';
+  const pubCountry = request.headers.get('cf-ipcountry') || '';   // 2-letter geo (e.g. "DK"), free via Cloudflare
   const pubOrigin = request.headers.get('x-publish-origin') || '';
   const pubUa = (request.headers.get('x-publish-ua') || '').slice(0, 200);
   await env.BUCKET.put(keyFor(code), bytes, {
@@ -220,6 +221,7 @@ async function handlePublish(request, env) {
   });
   await env.BUCKET.put(metaKeyFor(code), JSON.stringify({
     ip: pubIp,
+    country: pubCountry,
     origin: pubOrigin,
     ua: pubUa,
     publishedAt: new Date().toISOString(),
@@ -242,6 +244,7 @@ async function handleProject(code, env) {
   };
   const meta = await readWorkMeta(env, code);
   if (meta.ip) headers['x-work-ip'] = meta.ip;
+  if (meta.country) headers['x-work-country'] = meta.country;
   if (meta.origin) headers['x-work-origin'] = meta.origin;
   if (meta.ua) headers['x-work-ua'] = meta.ua;
   return new Response(obj.body, { headers });
@@ -252,12 +255,12 @@ async function handleProject(code, env) {
 async function readWorkMeta(env, code) {
   try {
     const obj = await env.BUCKET.get(metaKeyFor(code));
-    if (!obj) return { ip: '', origin: '', ua: '' };
+    if (!obj) return { ip: '', country: '', origin: '', ua: '' };
     const text = await obj.text();   // R2 Object.text() decodes for us
     const meta = JSON.parse(text);
-    return { ip: meta.ip || '', origin: meta.origin || '', ua: meta.ua || '' };
+    return { ip: meta.ip || '', country: meta.country || '', origin: meta.origin || '', ua: meta.ua || '' };
   } catch (err) {
-    return { ip: '', origin: '', ua: '' };
+    return { ip: '', country: '', origin: '', ua: '' };
   }
 }
 
@@ -271,11 +274,12 @@ async function listAllWorks(env) {
     for (const o of res.objects || []) {
       const m = o.key.match(new RegExp('^' + KEY_PREFIX + '([a-z]{' + CODE_LEN + '})\\.zip$'));
       if (!m) continue;
-      const work = { code: m[1], size: o.size, updated: o.uploaded, ip: '', origin: '', ua: '' };
+      const work = { code: m[1], size: o.size, updated: o.uploaded, ip: '', country: '', origin: '', ua: '' };
       // Read back the publishing context from the sidecar meta object
       // (small JSON, not the work zip). Best-effort: older works have none.
       const meta = await readWorkMeta(env, m[1]);
       work.ip = meta.ip;
+      work.country = meta.country;
       work.origin = meta.origin;
       work.ua = meta.ua;
       works.push(work);
