@@ -68,6 +68,8 @@
     background: var(--panel); border-top: 1px solid #2e3440;
   }
   footer a { color: var(--accent); text-decoration: none; }
+  footer #origin { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; word-break: break-word; }
+  footer #origin[hidden] { display: none; }
 </style>
 </head>
 <body>
@@ -88,14 +90,14 @@
   <span class="spacer"></span>
   <a class="fork" id="fork-btn" href="#" title="Load this work into the studio and make your own version">&#127912; Make my own copy</a>
 </div>
-<footer>Made with &#127916; <a href="/">flic.dk</a></footer>
+<footer>Made with &#127916; <a href="/">flic.dk</a><span id="origin" hidden></span></footer>
 <script src="zip-codec.js"></script>
 <script>
 (() => {
 'use strict';
 const $ = s => document.querySelector(s);
 const canvas = $('#playback'), msg = $('#msg'), bigplay = $('#bigplay');
-const playBtn = $('#play-btn'), counter = $('#counter'), fpsTag = $('#fps-tag');
+const playBtn = $('#play-btn'), counter = $('#counter'), fpsTag = $('#fps-tag'), originEl = $('#origin');
 /* Code comes from the path (/{code}) or ?c= (local dev redirect);
    codes are 5 letters, case-insensitive. ?mute=1 plays silently so the
    page can autoplay inside the admin preview iframe. */
@@ -256,6 +258,20 @@ bigplay.addEventListener('click', toggle);
       try { const d = await res.json(); if (d && d.error) detail = d.error; } catch (e) { /* keep default */ }
       showMsg('\u{1F43B} ' + detail);
       return;
+    }
+    // Show where the work was made from (sent by the worker as X-Work-* headers).
+    const workOrigin = res.headers.get('x-work-origin') || '';
+    const workIp = res.headers.get('x-work-ip') || '';
+    const workUa = res.headers.get('x-work-ua') || '';
+    if (workOrigin || workIp) {
+      const parts = [];
+      if (workOrigin) {
+        try { parts.push(new URL(workOrigin).host); } catch (e) { parts.push(workOrigin); }
+      }
+      if (workIp) parts.push(workIp);
+      originEl.textContent = 'Made from ' + parts.join(' · ') + (workUa ? ' · ' + workUa : '');
+      originEl.title = (workUa ? workUa : '') + (workOrigin ? '\n' + workOrigin : '');
+      originEl.hidden = false;
     }
     const files = ZipCodec.readZip(new Uint8Array(await res.arrayBuffer()));
     if (!files['project.json']) throw new Error('No project.json in the archive.');

@@ -1162,9 +1162,15 @@ async function publishProject() {
   setStatus('Publishing…');
   try {
     const bytes = await buildProjectZip();
+    // Send the publishing context so the admin list and viewer can show where
+    // the work came from. (Referer + User-Agent are forbidden fetch headers,
+    // so we forward them via custom headers the worker can read.)
+    const pubHeaders = { 'content-type': 'application/zip' };
+    try { pubHeaders['x-publish-origin'] = document.referrer || ''; } catch (e) { /* ignore */ }
+    try { pubHeaders['x-publish-ua'] = navigator.userAgent || ''; } catch (e) { /* ignore */ }
     const res = await fetch('/api/publish', {
       method: 'POST',
-      headers: { 'content-type': 'application/zip' },
+      headers: pubHeaders,
       body: bytes
     });
     let data = {};

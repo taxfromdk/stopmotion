@@ -201,8 +201,22 @@ async function handlePublish(request, env) {
   } catch (err) {
     return json({ error: err.message }, 503);
   }
+  // Publishing context: who/where the work was made from, for the admin list
+  // and viewer. ip from the CF header; the editor forwards document.referrer
+  // and navigator.userAgent via custom headers (both are forbidden on a
+  // browser fetch). Stored as R2 HTTP metadata so it travels with the object.
+  const pubIp = request.headers.get('cf-connecting-ip') || '';
+  const pubOrigin = request.headers.get('x-publish-origin') || '';
+  const pubUa = (request.headers.get('x-publish-ua') || '').slice(0, 200);
   await env.BUCKET.put(keyFor(code), bytes, {
-    httpMetadata: { contentType: 'application/zip' },
+    httpMetadata: {
+      contentType: 'application/zip',
+      customMetadata: {
+        ip: pubIp,
+        origin: pubOrigin,
+        ua: pubUa,
+      },
+    },
   });
   const origin = new URL(request.url).origin;
   return json({ code, url: origin + '/' + code, size: bytes.length });
@@ -211,14 +225,20 @@ async function handlePublish(request, env) {
 async function handleProject(code, env) {
   const obj = await env.BUCKET.get(keyFor(code));
   if (!obj) return json({ error: 'Work with code "' + code + '" was not found.' }, 404);
-  return new Response(obj.body, {
-    headers: {
-      'content-type': 'application/zip',
-      'content-length': String(obj.size),
-      'cache-control': 'public, max-age=3600',
-      'x-content-type-options': 'nosniff',
-    },
-  });
+  // Expose the publishing context (ip/origin/ua) as X-Work-* headers so the
+  // viewer can show where the work was made from. Custom headers are readable
+  // from the browser's fetch.
+  const meta = (obj.httpMetadata && obj.httpMetadata.customMetadata) || {};
+  const headers = {
+    'content-type': 'application/zip',
+    'content-length': String(obj.size),
+    'cache-control': 'public, max-age=3600',
+    'x-content-type-options': 'nosniff',
+  };
+  if (meta.ip) headers['x-work-ip'] = meta.ip;
+  if (meta.origin) headers['x-work-origin'] = meta.origin;
+  if (meta.ua) headers['x-work-ua'] = meta.ua;
+  return new Response(obj.body, { headers });
 }
 
 /* ---------- admin ---------- */
@@ -230,7 +250,20 @@ async function listAllWorks(env) {
     const res = await env.BUCKET.list({ prefix: KEY_PREFIX, limit: 1000, cursor });
     for (const o of res.objects || []) {
       const m = o.key.match(new RegExp('^' + KEY_PREFIX + '([a-z]{' + CODE_LEN + '})\\.zip$'));
-      if (m) works.push({ code: m[1], size: o.size, updated: o.uploaded });
+      if (!m) continue;
+      const work = { code: m[1], size: o.size, updated: o.uploaded, ip: '', origin: '', ua: '' };
+      // Read back the publishing context (ip/origin/ua) stored as R2 HTTP
+      // metadata at publish time. Best-effort: older works have none.
+      try {
+        const obj = await env.BUCKET.get(o.key);
+        if (obj) {
+          const meta = (obj && obj.httpMetadata && obj.httpMetadata.customMetadata) || {};
+          work.ip = meta.ip || '';
+          work.origin = meta.origin || '';
+          work.ua = meta.ua || '';
+        }
+      } catch (err) { /* metadata is optional — leave blank */ }
+      works.push(work);
     }
     cursor = res.truncated ? res.cursor : undefined;
   } while (cursor && pages++ < 50);

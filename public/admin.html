@@ -20,7 +20,7 @@
     margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     background: var(--bg); color: var(--text); min-height: 100vh;
   }
-  #wrap { max-width: 860px; margin: 0 auto; padding: 24px 16px 48px; }
+  #wrap { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
   header { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
   h1 { font-size: 20px; margin: 0; }
   h1 .sub { color: var(--muted); font-size: 14px; font-weight: 400; margin-left: 8px; }
@@ -55,7 +55,7 @@
     background: var(--panel); border: 1px solid #2e3440; border-radius: 12px;
     padding: 12px 14px; min-width: 0;
   }
-  .card .v { display: block; font-size: 19px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card .v { display: block; font-size: 16px; font-weight: 600; line-height: 1.3; word-break: break-word; }
   .card .l { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
   .card.error { color: #ff8080; }
 
@@ -67,6 +67,9 @@
     padding: 10px 14px; border-bottom: 1px solid #2e3440; white-space: nowrap;
   }
   td { padding: 9px 14px; border-bottom: 1px solid #262b36; white-space: nowrap; }
+  td.from { white-space: normal; max-width: 320px; }
+  td.from .from-origin { display: block; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+  td.from .from-ua { display: block; color: var(--muted); font-size: 11.5px; margin-top: 2px; }
   tbody tr { cursor: crosshair; }
   tbody tr:hover { background: var(--panel-2); }
   tbody tr:last-child td { border-bottom: none; }
@@ -110,7 +113,7 @@
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>#</th><th>Code</th><th>Size</th><th>Published</th></tr>
+          <tr><th>#</th><th>Code</th><th>Size</th><th>From</th><th>Published</th></tr>
         </thead>
         <tbody id="works-body"></tbody>
       </table>
@@ -198,10 +201,26 @@ function renderWorks(works) {
     tdCode.appendChild(a);
     const tdSize = document.createElement('td');
     tdSize.className = 'num'; tdSize.textContent = formatBytes(w.size);
+    const tdFrom = document.createElement('td');
+    tdFrom.className = 'from';
+    const originText = (w.origin && w.origin !== w.code) ? w.origin : '';
+    const originLine = document.createElement('span');
+    originLine.className = 'from-origin';
+    originLine.textContent = originText || '—';
+    originLine.title = originText || '';
+    tdFrom.appendChild(originLine);
+    if (w.ip || w.ua) {
+      const detail = [w.ip, w.ua].filter(Boolean).join(' · ');
+      const detailLine = document.createElement('span');
+      detailLine.className = 'from-ua';
+      detailLine.textContent = detail;
+      detailLine.title = detail;
+      tdFrom.appendChild(detailLine);
+    }
     const tdDate = document.createElement('td');
     tdDate.className = 'num'; tdDate.textContent = timeAgo(w.updated);
     tdDate.title = new Date(w.updated).toLocaleString();
-    tr.append(tdNum, tdCode, tdSize, tdDate);
+    tr.append(tdNum, tdCode, tdSize, tdFrom, tdDate);
     tr.addEventListener('mouseenter', () => schedulePreview(w.code, tr));
     tr.addEventListener('mouseleave', scheduleHidePreview);
     tbody.appendChild(tr);
