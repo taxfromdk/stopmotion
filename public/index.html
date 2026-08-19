@@ -151,9 +151,9 @@
   <div class="header-right">
     <span id="storage-info" style="color:var(--muted);font-size:13px;"></span>
     <span id="app-version" title="App version" style="color:var(--muted);font-size:12.5px;font-variant-numeric:tabular-nums;"></span>
-    <button id="publish-btn" title="Publish your work on the web and get a shareable link">&#128640; Publish</button>
-    <button id="save-project-btn" title="Download the whole project (structure + images + sounds) as a .zip file">&#128190; Save project</button>
-    <button id="load-project-btn" title="Open a previously saved .zip project file">&#128194; Load project&#8230;</button>
+    <button id="publish-btn" title="Publish your work on the web — anyone with the link will be able to see it. Get a shareable link.">&#128640; Publish</button>
+    <button id="save-project-btn" title="Download the whole project (structure + images + sounds) as a .zip file">&#128190; Download project</button>
+    <button id="load-project-btn" title="Upload a previously downloaded .zip project file">&#128194; Upload project&#8230;</button>
   </div>
 </header>
 <main>
@@ -167,6 +167,7 @@
         <div class="controls">
           <button id="capture-btn">&#128247; Capture frame</button>
           <button id="retry-cam" title="Request camera access again">&#128247; Retry camera</button>
+          <button id="flip-cam" title="Switch to the next camera" disabled>&#8634; Flip camera</button>
           <label class="ghost-label" title="Overlay the last captured frame at 50% opacity so you can align objects between shots">
             <input type="checkbox" id="ghost-toggle" /> Ghost previous (50%)
           </label>
@@ -225,6 +226,14 @@ const KEY_FRAMES = 'stopmotion.frames.v1';
 const KEY_SETTINGS = 'stopmotion.settings.v1';
 
 let frames = [];            // [{id, url}] in playback order
+/* Publish gating: baseFingerprint is null for an original session (can
+   publish if non-empty). After a fork or file upload it is set to the
+   workFingerprint() at load time — publishing is blocked until the work
+   changes (you can't republish an unmodified copy). */
+let baseFingerprint = null;
+function workFingerprint() {
+  return JSON.stringify(frames.map(f => [f.url, f.sound || null, !!f.hold]));
+}
 let settings = { fps: 8, ghost: true, loop: true };
 let stream = null;
 let playing = false;
@@ -287,6 +296,8 @@ function updateStorageInfo() {
 }
 
 /* ---------- camera ---------- */
+let camDevices = [];   // videoinput devices from enumerateDevices
+let camIndex = 0;     // current camera index
 async function startCamera() {
   if (!window.isSecureContext) {
     captureBtn.disabled = true;
@@ -300,13 +311,28 @@ async function startCamera() {
   }
   try {
     const oldStream = stream;
+    const videoConstraints = { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } };
+    // Use a specific deviceId if we have a list of cameras.
+    if (camDevices.length > 0 && camIndex < camDevices.length) {
+      videoConstraints.deviceId = { exact: camDevices[camIndex].deviceId };
+    }
     stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+      video: videoConstraints,
       audio: false
     });
     if (oldStream) oldStream.getTracks().forEach(t => t.stop());
     video.srcObject = stream;
     captureBtn.disabled = false;
+    // Refresh the camera list (labels are only available after permission).
+    try {
+      const devs = await navigator.mediaDevices.enumerateDevices();
+      camDevices = devs.filter(d => d.kind === 'videoinput');
+      const flipBtn = $('#flip-cam');
+      flipBtn.disabled = camDevices.length < 2;
+      flipBtn.title = camDevices.length >= 2
+        ? 'Camera ' + (camIndex + 1) + ' of ' + camDevices.length + ': ' + (camDevices[camIndex].label || 'unknown')
+        : 'Only one camera available';
+    } catch (e) { /* ignore */ }
     setStatus('Camera ready. Press Capture to add a frame — the ghost overlay helps you align objects.');
   } catch (err) {
     captureBtn.disabled = true;
@@ -340,9 +366,8 @@ function updateGhost() {           // camera mode: the frame before the next sho
 }
 function capture() {
   if (!video.videoWidth || !video.videoHeight) return;
-  const maxEdge = 1280;
   let w = video.videoWidth, h = video.videoHeight;
-  const s = Math.min(1, maxEdge / Math.max(w, h));
+  const s = Math.min(1, 1280 / w, 720 / h);
   w = Math.round(w * s); h = Math.round(h * s);
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
@@ -515,6 +540,12 @@ $('#clear-btn').addEventListener('click', () => {
 
 captureBtn.addEventListener('click', capture);
 $('#retry-cam').addEventListener('click', startCamera);
+function flipCamera() {
+  if (camDevices.length < 2) return;
+  camIndex = (camIndex + 1) % camDevices.length;
+  startCamera();
+}
+$('#flip-cam').addEventListener('click', flipCamera);
 
 /* ---------- init ---------- */
 loadState();
@@ -524,7 +555,7 @@ ghostToggle.checked = settings.ghost;
 loopToggle.checked = settings.loop !== false;
 $('#app-version').textContent = 'v' + APP_VERSION;
 renderFrames(); updateGhost(); startCamera();
-/* Forking: /?fork=apple-bee-sun loads a shared work into the editor */
+/* Forking: /?fork=qzmnx loads a shared work into the editor */
 const forkCode = new URLSearchParams(location.search).get('fork');
 if (forkCode) {
   history.replaceState(null, '', location.pathname);
@@ -658,8 +689,10 @@ function bytesToB64(bytes) {
 }
 function extForMime(mime) { return MIME_EXT[String(mime).split(';')[0]] || 'bin'; } // strip codec params, e.g. audio/webm;codecs=opus
 
-/* Build the archive: project.json (structure) + frames/*.jpg + sounds/* */
-function buildProjectZip() {
+/* Build the archive: project.json (structure) + frames/*.jpg + sounds/* +
+   player.html (a self-contained offline player, so the film can be opened
+   years later by unzipping and opening player.html). */
+async function buildProjectZip() {
   const entries = [];
   const frameRefs = frames.map((f, i) => {
     const n = String(i + 1).padStart(3, '0');
@@ -677,6 +710,44 @@ function buildProjectZip() {
   });
   const project = { format: 'stopmotion-project', version: 1, settings: { fps: settings.fps, ghost: !!settings.ghost, loop: !!settings.loop }, frames: frameRefs };
   entries.push({ name: 'project.json', data: new TextEncoder().encode(JSON.stringify(project, null, 2)) });
+  // Bundle a self-contained offline player so the film plays from the unzipped
+  // folder alone (no internet, no server). Best-effort: if the player source
+  // can't be fetched (e.g. opened straight from disk), skip it.
+  try {
+    const res = await fetch('player.html');
+    if (res.ok) entries.push({ name: 'player.html', data: new Uint8Array(await res.arrayBuffer()) });
+  } catch (e) { /* player.html not fetchable — skip */ }
+  // film-data.js inlines every frame/sound as a data URL so player.html can
+  // play the film straight from file:// (where fetch() of sibling files is
+  // blocked). Written as a plain JS assignment — no fetch needed.
+  const filmData = {
+    format: 'stopmotion-project',
+    version: 1,
+    settings: { fps: settings.fps, ghost: !!settings.ghost, loop: !!settings.loop },
+    frames: frameRefs.map(ref => {
+      const img = parseDataUrl(frames.find(f => f.id === ref.id).url);
+      const r = { image: ref.image, imageData: 'data:' + img.mime + ';base64,' + img.b64 };
+      if (ref.sound) {
+        const snd = parseDataUrl(frames.find(f => f.id === ref.id).sound);
+        r.sound = { path: ref.sound.path, data: 'data:' + snd.mime + ';base64,' + snd.b64 };
+      }
+      if (ref.hold) r.hold = true;
+      return r;
+    })
+  };
+  entries.push({ name: 'film-data.js', data: new TextEncoder().encode('window.__FILM_DATA__ = ' + JSON.stringify(filmData) + ';\n') });
+  entries.push({ name: 'README.txt', data: new TextEncoder().encode(
+    'Stop Motion Studio — ' + frames.length + ' frame(s) at ' + settings.fps + ' fps\n' +
+    '\n' +
+    'To watch this film offline (no internet needed):\n' +
+    '  1. Unzip this archive into a folder.\n' +
+    '  2. Open "player.html" in a web browser (double-click it, or drag the\n' +
+    '     folder into a browser window).\n' +
+    '  3. Press Play.\n' +
+    '\n' +
+    'The frames live in "frames/", sounds in "sounds/", and the film\n' +
+    'metadata in "project.json".\n'
+  )});
   return ZipCodec.writeZip(entries);
 }
 
@@ -688,15 +759,15 @@ function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
 
-function saveProject() {
+async function saveProject() {
   try {
-    setStatus('Saving project…');
-    const bytes = buildProjectZip();
+    setStatus('Downloading project…');
+    const bytes = await buildProjectZip();
     downloadBlob(new Blob([bytes], { type: 'application/zip' }), 'stopmotion-project.zip');
-    setStatus('Saved stopmotion-project.zip (' + formatBytes(bytes.length) + ', ' + frames.length + ' frame(s)).');
+    setStatus('Downloaded stopmotion-project.zip (' + formatBytes(bytes.length) + ', ' + frames.length + ' frame(s)).');
   } catch (err) {
     console.error(err);
-    setStatus('Could not save project: ' + err.message, true);
+    setStatus('Could not download project: ' + err.message, true);
   }
 }
 
@@ -736,24 +807,26 @@ async function loadProjectFromFiles(files, label) {
   loopToggle.checked = settings.loop !== false;
   persist(); renderFrames(); updateGhost();
   stage.dataset.mode = 'camera'; setPlayButtons();
+  baseFingerprint = workFingerprint();
   return newFrames.length;
 }
 
 async function loadProjectFile(file) {
   try {
     const n = await loadProjectFromFiles(ZipCodec.readZip(await file.arrayBuffer()), '"' + file.name + '"');
-    if (n) setStatus('Loaded "' + file.name + '": ' + n + ' frame(s) at ' + settings.fps + ' fps.');
+    if (n) setStatus('Uploaded "' + file.name + '": ' + n + ' frame(s) at ' + settings.fps + ' fps.');
   } catch (err) {
     console.error(err);
-    setStatus('Could not load project: ' + err.message, true);
+    setStatus('Could not open the uploaded project: ' + err.message, true);
   } finally {
     $('#project-file').value = '';
   }
 }
 
-/* Forking: open this page with /?fork=apple-bee-sun (the viewer's
+/* Forking: open this page with /?fork=qzmnx (the viewer's
    "Make my own copy" button) to load a shared work into the editor. */
 async function loadFork(code) {
+  code = String(code).toLowerCase();
   try {
     setStatus('Making your own copy of "' + code + '"…');
     const res = await fetch('/api/project/' + encodeURIComponent(code));
@@ -776,9 +849,13 @@ async function loadFork(code) {
 /* ---------- publishing ---------- */
 async function publishProject() {
   if (!frames.length) { setStatus('Capture some frames before publishing.', true); return; }
+  if (baseFingerprint !== null && workFingerprint() === baseFingerprint) {
+    setStatus('Make a change first — you can\'t publish an unmodified copy.', true); return;
+  }
+  if (!confirm('Publish this work? Anyone who gets the link will be able to see it.')) return;
   setStatus('Publishing…');
   try {
-    const bytes = buildProjectZip();
+    const bytes = await buildProjectZip();
     const res = await fetch('/api/publish', {
       method: 'POST',
       headers: { 'content-type': 'application/zip' },

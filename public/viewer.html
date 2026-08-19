@@ -96,8 +96,12 @@
 const $ = s => document.querySelector(s);
 const canvas = $('#playback'), msg = $('#msg'), bigplay = $('#bigplay');
 const playBtn = $('#play-btn'), counter = $('#counter'), fpsTag = $('#fps-tag');
-/* Code comes from the path (/{code}) or ?c= (local dev redirect) */
-const code = new URLSearchParams(location.search).get('c') || decodeURIComponent(location.pathname.slice(1));
+/* Code comes from the path (/{code}) or ?c= (local dev redirect);
+   codes are 5 letters, case-insensitive. ?mute=1 plays silently so the
+   page can autoplay inside the admin preview iframe. */
+const params = new URLSearchParams(location.search);
+const code = String(params.get('c') || decodeURIComponent(location.pathname.slice(1))).toLowerCase();
+const muted = params.get('mute') === '1';
 
 $('#code-label').textContent = code ? '· ' + code : '';
 $('#fork-btn').href = '/?fork=' + encodeURIComponent(code);
@@ -144,6 +148,7 @@ function playFrameSound(i) {
   const f = frames[i];
   if (!f || !f.sound) return;
   const el = new Audio(f.sound);
+  if (muted) el.muted = true;
   if (f.hold && playing) {
     soundHold = el;
     const release = () => {
@@ -239,7 +244,8 @@ bigplay.addEventListener('click', toggle);
     canvas.hidden = false;
     drawFrame(0);
     setPlayButtons();
-    if (!hasSounds()) play();   // silent works can autoplay; works with sound start paused
+    // Silent works and muted previews can autoplay; others start paused.
+    if (muted || !hasSounds()) play();
   } catch (err) {
     console.error(err);
     showMsg('Could not load this work: ' + err.message);

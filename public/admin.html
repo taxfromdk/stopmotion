@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark" />
+<title>Admin · Stop Motion Studio</title>
+<style>
+  :root {
+    --bg: #16191f;
+    --panel: #20242d;
+    --panel-2: #2a303c;
+    --text: #e8ebf0;
+    --muted: #9aa3b2;
+    --accent: #5b8cff;
+    --ok: #379268;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text); min-height: 100vh;
+  }
+  #wrap { max-width: 860px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  h1 { font-size: 20px; margin: 0; }
+  h1 .sub { color: var(--muted); font-size: 14px; font-weight: 400; margin-left: 8px; }
+  button {
+    font: inherit; font-size: 14px; color: var(--text);
+    background: var(--panel-2); border: 1px solid #394152;
+    border-radius: 8px; padding: 7px 12px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  .hint { color: var(--muted); font-size: 13px; line-height: 1.5; }
+
+  /* ---- login ---- */
+  #login-card {
+    max-width: 340px; margin: 48px auto; background: var(--panel);
+    border: 1px solid #2e3440; border-radius: 14px; padding: 24px;
+  }
+  #login-card h2 { margin: 0 0 4px; font-size: 17px; }
+  #login-card .row { margin-top: 12px; }
+  #login-card input {
+    width: 100%; font: inherit; color: var(--text);
+    background: var(--bg); border: 1px solid #394152; border-radius: 8px; padding: 9px 11px;
+  }
+  #login-card input:focus { outline: none; border-color: var(--accent); }
+  #login-btn { margin-top: 16px; width: 100%; font-weight: 600; background: #2e7d5b; border-color: #3d9970; }
+  #login-btn:hover { background: #379268; }
+  #login-error { color: #ff8080; font-size: 13.5px; margin: 10px 0 0; text-align: center; }
+  #login-card[hidden], #dashboard[hidden] { display: none; }
+
+  /* ---- stats ---- */
+  #stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin: 18px 0; }
+  .card {
+    background: var(--panel); border: 1px solid #2e3440; border-radius: 12px;
+    padding: 12px 14px; min-width: 0;
+  }
+  .card .v { display: block; font-size: 19px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card .l { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+  .card.error { color: #ff8080; }
+
+  /* ---- table ---- */
+  .table-wrap { background: var(--panel); border: 1px solid #2e3440; border-radius: 12px; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th {
+    text-align: left; color: var(--muted); font-weight: 500; font-size: 12.5px;
+    padding: 10px 14px; border-bottom: 1px solid #2e3440; white-space: nowrap;
+  }
+  td { padding: 9px 14px; border-bottom: 1px solid #262b36; white-space: nowrap; }
+  tbody tr { cursor: crosshair; }
+  tbody tr:hover { background: var(--panel-2); }
+  tbody tr:last-child td { border-bottom: none; }
+  td a { color: var(--accent); text-decoration: none; font-weight: 600; }
+  td a:hover { text-decoration: underline; }
+  .num { color: var(--muted); font-variant-numeric: tabular-nums; }
+  #empty { padding: 20px; text-align: center; }
+  .tip { margin-top: 12px; }
+
+  /* ---- hover preview iframe ---- */
+  #preview {
+    position: fixed; z-index: 100; width: 340px; height: 260px;
+    background: var(--panel); border: 2px solid var(--accent); border-radius: 12px;
+    overflow: hidden; box-shadow: 0 18px 50px rgba(0, 0, 0, .55);
+  }
+  #preview[hidden] { display: none; }
+  #preview iframe { width: 100%; height: 100%; border: 0; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <header>
+    <h1>&#128736; Admin<span class="sub">Stop Motion Studio</span></h1>
+    <div id="auth-bar" hidden style="display:flex;gap:8px;">
+      <button id="refresh-btn" title="Reload works and stats">&#8635; Refresh</button>
+      <button id="logout-btn">Sign out</button>
+    </div>
+  </header>
+
+  <section id="login-card">
+    <h2>Sign in</h2>
+    <p class="hint" style="margin:0;">Staff only.</p>
+    <div class="row"><input id="login" placeholder="Login" autocomplete="username" /></div>
+    <div class="row"><input id="password" type="password" placeholder="Password" autocomplete="current-password" /></div>
+    <button id="login-btn">Sign in</button>
+    <p id="login-error" hidden>Wrong login or password.</p>
+  </section>
+
+  <section id="dashboard" hidden>
+    <div id="stats"></div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>#</th><th>Code</th><th>Size</th><th>Published</th></tr>
+        </thead>
+        <tbody id="works-body"></tbody>
+      </table>
+      <p id="empty" class="hint" hidden>No published works yet.</p>
+    </div>
+    <p class="hint tip">Hover a row to preview the work in miniature (muted). Click a code to open the full viewer.</p>
+  </section>
+</div>
+
+<div id="preview" hidden><iframe id="preview-frame" title="Work preview" tabindex="-1"></iframe></div>
+<script>
+(() => {
+'use strict';
+const $ = s => document.querySelector(s);
+const USER = 'flic', PASS = 'stopmotion';
+const AUTH = USER + ':' + PASS;   // must match ADMIN_AUTH in src/worker.js
+const loginCard = $('#login-card'), dashboard = $('#dashboard'), authBar = $('#auth-bar');
+const statsEl = $('#stats'), tbody = $('#works-body'), emptyEl = $('#empty');
+const preview = $('#preview'), frame = $('#preview-frame');
+let hoverTimer = null, hideTimer = null;
+
+function formatBytes(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1048576).toFixed(2) + ' MB';
+}
+function timeAgo(iso) {
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + ' min ago';
+  if (s < 86400) return Math.floor(s / 3600) + ' h ago';
+  if (s < 2592000) return Math.floor(s / 86400) + ' d ago';
+  return new Date(iso).toLocaleDateString();
+}
+
+/* ---------- data ---------- */
+async function load() {
+  try {
+    const res = await fetch('/api/admin/summary', { headers: { 'x-admin-auth': AUTH } });
+    if (res.status === 401) { signOut(); return; }
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    renderStats(data.stats);
+    renderWorks(data.works);
+  } catch (err) {
+    statsEl.innerHTML = '';
+    const c = document.createElement('div');
+    c.className = 'card error';
+    c.textContent = 'Could not load: ' + err.message;
+    statsEl.appendChild(c);
+  }
+}
+function renderStats(s) {
+  const cards = [
+    ['Works', String(s.total)],
+    ['Storage', formatBytes(s.totalBytes)],
+    ['Today', String(s.today)],
+    ['Last 7 days', String(s.last7)],
+    ['Largest', s.largest ? s.largest.code + ' · ' + formatBytes(s.largest.size) : '—'],
+    ['Oldest', s.oldest ? s.oldest.code + ' · ' + timeAgo(s.oldest.updated) : '—'],
+  ];
+  statsEl.innerHTML = '';
+  for (const [label, value] of cards) {
+    const d = document.createElement('div');
+    d.className = 'card';
+    const v = document.createElement('span');
+    v.className = 'v'; v.textContent = value;
+    const l = document.createElement('span');
+    l.className = 'l'; l.textContent = label;
+    d.append(v, l);
+    statsEl.appendChild(d);
+  }
+}
+function renderWorks(works) {
+  tbody.innerHTML = '';
+  emptyEl.hidden = works.length > 0;
+  works.forEach((w, i) => {
+    const tr = document.createElement('tr');
+    tr.dataset.code = w.code;
+    const tdNum = document.createElement('td');
+    tdNum.className = 'num'; tdNum.textContent = i + 1;
+    const tdCode = document.createElement('td');
+    const a = document.createElement('a');
+    a.href = '/' + w.code; a.target = '_blank'; a.textContent = w.code;
+    tdCode.appendChild(a);
+    const tdSize = document.createElement('td');
+    tdSize.className = 'num'; tdSize.textContent = formatBytes(w.size);
+    const tdDate = document.createElement('td');
+    tdDate.className = 'num'; tdDate.textContent = timeAgo(w.updated);
+    tdDate.title = new Date(w.updated).toLocaleString();
+    tr.append(tdNum, tdCode, tdSize, tdDate);
+    tr.addEventListener('mouseenter', () => schedulePreview(w.code, tr));
+    tr.addEventListener('mouseleave', scheduleHidePreview);
+    tbody.appendChild(tr);
+  });
+}
+
+/* ---------- hover preview ---------- */
+function schedulePreview(code, row) {
+  clearTimeout(hideTimer);
+  clearTimeout(hoverTimer);
+  hoverTimer = setTimeout(() => {
+    frame.src = '/viewer.html?c=' + encodeURIComponent(code) + '&mute=1';
+    positionPreview(row);
+    preview.hidden = false;
+  }, 200);
+}
+function positionPreview(row) {
+  const r = row.getBoundingClientRect();
+  const W = 340, H = 260;
+  let x = r.right + 14;
+  if (x + W > innerWidth - 8) x = r.left - W - 14;
+  if (x < 8) x = Math.max(8, Math.min(innerWidth - W - 8, (innerWidth - W) / 2));
+  const y = Math.max(8, Math.min(innerHeight - H - 8, r.top - 40));
+  preview.style.left = x + 'px';
+  preview.style.top = y + 'px';
+}
+function scheduleHidePreview() {
+  clearTimeout(hoverTimer);
+  hideTimer = setTimeout(() => {
+    preview.hidden = true;
+    frame.src = 'about:blank';
+  }, 400);
+}
+
+/* ---------- auth ---------- */
+function signIn() {
+  if ($('#login').value === USER && $('#password').value === PASS) {
+    $('#login-error').hidden = true;
+    sessionStorage.setItem('sm-admin', '1');
+    showAuthed();
+  } else {
+    $('#login-error').hidden = false;
+  }
+}
+function showAuthed() {
+  loginCard.hidden = true;
+  dashboard.hidden = false;
+  authBar.hidden = false;
+  load();
+}
+function signOut() {
+  sessionStorage.removeItem('sm-admin');
+  dashboard.hidden = true;
+  authBar.hidden = true;
+  loginCard.hidden = false;
+  preview.hidden = true;
+  frame.src = 'about:blank';
+}
+
+$('#login-btn').addEventListener('click', signIn);
+$('#password').addEventListener('keydown', e => { if (e.key === 'Enter') signIn(); });
+$('#login').addEventListener('keydown', e => { if (e.key === 'Enter') $('#password').focus(); });
+$('#refresh-btn').addEventListener('click', load);
+$('#logout-btn').addEventListener('click', signOut);
+
+if (sessionStorage.getItem('sm-admin') === '1') showAuthed();
+})();
+</script>
+</body>
+</html>

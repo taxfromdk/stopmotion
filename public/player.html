@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark" />
+<title>Stop Motion</title>
+<style>
+  :root { --bg:#16191f; --panel:#20242d; --panel-2:#2a303c; --text:#e8ebf0; --muted:#9aa3b2; --accent:#5b8cff; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); display:flex; flex-direction:column; overflow:hidden; }
+  header { display:flex; align-items:center; gap:10px; padding:10px 16px; border-bottom:1px solid #2e3440; }
+  header .title { font-size:15px; }
+  main { flex:1; min-height:0; display:flex; }
+  #stage { position:relative; flex:1; min-width:0; min-height:220px; background:#000; display:flex; align-items:center; justify-content:center; }
+  #playback { max-width:100%; max-height:100%; object-fit:contain; }
+  #bigplay { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:74px; height:74px; border-radius:50%; padding:0; background:rgba(91,140,255,.92); border:4px solid rgba(255,255,255,.25); font-size:30px; line-height:1; cursor:pointer; z-index:3; display:flex; align-items:center; justify-content:center; }
+  #bigplay:hover { background:#6f9aff; }
+  #bigplay[hidden] { display:none; }
+  #msg { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:24px; text-align:center; color:var(--muted); font-size:15px; line-height:1.6; }
+  #msg[hidden] { display:none; }
+  #bar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 14px; background:var(--panel); border-top:1px solid #2e3440; }
+  button { font:inherit; font-size:14px; color:var(--text); background:var(--panel-2); border:1px solid #394152; border-radius:10px; padding:8px 14px; cursor:pointer; }
+  button:hover:not(:disabled) { border-color:var(--accent); }
+  #counter { color:var(--muted); font-size:13.5px; font-variant-numeric:tabular-nums; min-width:64px; text-align:center; }
+  #fps-tag { color:var(--muted); font-size:13px; }
+  footer { padding:6px 14px; text-align:center; color:var(--muted); font-size:12px; background:var(--panel); border-top:1px solid #2e3440; }
+</style>
+</head>
+<body>
+<header>
+  <span class="title">&#127916; Stop Motion</span>
+</header>
+<main>
+  <div id="stage">
+    <canvas id="playback" hidden></canvas>
+    <button id="bigplay" hidden title="Play">&#9654;</button>
+    <div id="msg" hidden>Loading&#8230;</div>
+  </div>
+</main>
+<div id="bar">
+  <button id="play-btn" disabled>&#9654; Play</button>
+  <span id="counter"></span>
+  <span id="fps-tag"></span>
+</div>
+<footer>Made with &#127916; Stop Motion Studio — this player is bundled in the zip so the film can be opened offline.</footer>
+<script>
+(() => {
+'use strict';
+const $ = s => document.querySelector(s);
+const canvas = $('#playback'), msg = $('#msg'), bigplay = $('#bigplay');
+const playBtn = $('#play-btn'), counter = $('#counter'), fpsTag = $('#fps-tag');
+
+function showMsg(t) { msg.textContent = t; msg.hidden = false; }
+
+let frames = [], settings = { fps: 8, loop: true };
+let playing = false, playIndex = 0, loadedImgs = [];
+let rafId = null, lastT = 0, acc = 0, soundHold = null;
+const hasSounds = () => frames.some(f => f.sound);
+
+function drawFrame(i) {
+  if (!loadedImgs.length) return;
+  const img = loadedImgs[i];
+  if (canvas.width !== img.naturalWidth || canvas.height !== img.naturalHeight) {
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+  }
+  canvas.getContext('2d').drawImage(img, 0, 0);
+  counter.textContent = (i + 1) + ' / ' + frames.length;
+}
+function setPlayButtons() {
+  playBtn.innerHTML = playing ? '&#9208; Pause' : '&#9654; Play';
+  playBtn.disabled = !frames.length;
+  bigplay.hidden = playing || !frames.length;
+  bigplay.title = playing ? 'Pause' : 'Play';
+  bigplay.innerHTML = playing ? '&#9208;' : '&#9654;';
+}
+function stopAllSounds() { if (soundHold) { soundHold.pause(); soundHold = null; } }
+function playFrameSound(i) {
+  const f = frames[i];
+  if (!f || !f.sound) return;
+  const el = new Audio(f.sound);
+  if (f.hold && playing) {
+    soundHold = el;
+    const release = () => {
+      if (soundHold === el) { soundHold = null; lastT = performance.now(); acc = 0; }
+      el.removeEventListener('ended', release);
+      el.removeEventListener('error', release);
+    };
+    el.addEventListener('ended', release);
+    el.addEventListener('error', release);
+  }
+  const p = el.play();
+  if (p && p.catch) p.catch(() => {});
+}
+function tick(now) {
+  if (!playing) return;
+  rafId = requestAnimationFrame(tick);
+  if (soundHold && !soundHold.ended) return;
+  acc += now - lastT; lastT = now;
+  const stepMs = 1000 / settings.fps;
+  const prevIdx = playIndex;
+  while (acc >= stepMs) {
+    acc -= stepMs;
+    if (playIndex < frames.length - 1) playIndex++;
+    else if (!settings.loop) { pause(); return; }
+    else playIndex = 0;
+  }
+  drawFrame(playIndex);
+  if (playIndex !== prevIdx) playFrameSound(playIndex);
+}
+function play() {
+  if (!frames.length || playing) return;
+  playing = true; stopAllSounds();
+  if (playIndex >= frames.length) playIndex = 0;
+  lastT = performance.now(); acc = 0;
+  playFrameSound(playIndex); setPlayButtons();
+  rafId = requestAnimationFrame(tick);
+}
+function pause() {
+  playing = false;
+  if (rafId) cancelAnimationFrame(rafId);
+  rafId = null; stopAllSounds(); setPlayButtons();
+}
+function toggle() { playing ? pause() : play(); }
+playBtn.addEventListener('click', toggle);
+bigplay.addEventListener('click', toggle);
+
+/* Load the film. Two modes:
+   - Served (http/https): fetch project.json + each media file. This is the
+     case when the work is viewed on the Stop Motion Studio site or unzipped
+     and served by any local web server.
+   - Offline (file://): browsers block fetch() of sibling files, so instead
+     the zip also contains film-data.js with every frame/sound inlined as data
+     URLs. The player loads that with a normal <script> tag, which works from
+     file://. Double-clicking player.html just plays the film. */
+(async () => {
+  const isFile = location.protocol === 'file:';
+  if (isFile) {
+    // Inject film-data.js (defines window.__FILM_DATA__).
+    await new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = 'film-data.js';
+      s.onload = res;
+      s.onerror = () => rej(new Error('film-data.js not found — the archive may be incomplete.'));
+      document.head.appendChild(s);
+    });
+    const project = window.__FILM_DATA__;
+    applyProject(project);
+  } else {
+    try {
+      const res = await fetch('project.json');
+      if (!res.ok) throw new Error('project.json not found. Unzip the archive and open player.html from inside the unzipped folder.');
+      applyProject(JSON.parse(await res.text()));
+    } catch (err) {
+      console.error(err);
+      showMsg('Could not load this work: ' + err.message);
+    }
+  }
+})();
+
+function applyProject(project) {
+  try {
+    if (project.format !== 'stopmotion-project' || !Array.isArray(project.frames)) throw new Error('Unrecognized project file.');
+    const refs = project.frames;
+    if (!refs.length) { showMsg('This work has no frames yet.'); return; }
+    if (project.settings && typeof project.settings === 'object') {
+      settings.fps = Math.min(24, Math.max(1, +project.settings.fps || 8));
+      settings.loop = project.settings.loop !== false;
+    }
+    fpsTag.textContent = settings.fps + ' fps' + (settings.loop ? ' · loops' : '');
+    const isFile = location.protocol === 'file:';
+    const loaded = [];
+    (async () => {
+      for (const ref of refs) {
+        let url;
+        if (isFile) {
+          url = ref.imageData; // data URL, inlined by film-data.js
+          if (!url) throw new Error('Missing image data for "' + ref.image + '".');
+          const f = { url };
+          if (ref.sound) {
+            if (!ref.sound.data) throw new Error('Missing sound data for "' + ref.sound.path + '".');
+            f.sound = ref.sound.data;
+          }
+          if (ref.hold) f.hold = true;
+          frames.push(f);
+          const im = new Image();
+          im.onload = () => loaded.push(im);
+          im.onerror = () => loaded.push(null);
+          im.src = url;
+        } else {
+          const imgRes = await fetch(ref.image);
+          if (!imgRes.ok) throw new Error('Missing image "' + ref.image + '".');
+          const f = { url: URL.createObjectURL(await imgRes.blob()) };
+          if (ref.sound) {
+            const sndRes = await fetch(ref.sound.path);
+            if (!sndRes.ok) throw new Error('Missing sound "' + ref.sound.path + '".');
+            f.sound = URL.createObjectURL(await sndRes.blob());
+          }
+          if (ref.hold) f.hold = true;
+          frames.push(f);
+          const im = new Image();
+          im.onload = () => loaded.push(im);
+          im.onerror = () => loaded.push(null);
+          im.src = f.url;
+        }
+      }
+      // Wait for all images to decode.
+      await new Promise(r => setTimeout(r, 50));
+      while (loaded.length < frames.length) await new Promise(r => setTimeout(r, 20));
+      loadedImgs = loaded.filter(Boolean);
+      if (!loadedImgs.length) { showMsg('Could not decode the frames.'); return; }
+      msg.hidden = true;
+      canvas.hidden = false;
+      drawFrame(0);
+      setPlayButtons();
+      if (!hasSounds()) play();
+    })().catch(err => { console.error(err); showMsg('Could not load this work: ' + err.message); });
+  } catch (err) {
+    console.error(err);
+    showMsg('Could not load this work: ' + err.message);
+  }
+}
+})();
+</script>
+</body>
+</html>
