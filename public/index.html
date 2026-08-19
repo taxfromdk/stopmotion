@@ -74,15 +74,12 @@
   label.ghost-label { display: flex; align-items: center; gap: 7px; cursor: pointer; user-select: none; font-size: 14px; color: var(--muted); }
   input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; }
   input[type="range"] { accent-color: var(--accent); width: 110px; }
-  .fps-val { min-width: 42px; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
   #status { font-size: 13px; color: var(--muted); min-width: 160px; }
   #status.error { color: var(--danger); }
   /* Compact controls in the single top control bar */
   #ctrl-bar button { padding: 6px 10px; font-size: 13.5px; }
   #ctrl-bar #capture-btn { padding: 6px 14px; }
   #ctrl-bar .group { padding: 4px 8px; gap: 6px; }
-  #ctrl-bar .group input[type="range"] { width: 96px; }
-  #ctrl-bar .group .fps-label { font-size: 12px; }
   #ctrl-bar label.ghost-label { font-size: 13px; gap: 5px; }
 
   /* ---- reel (bottom strip) ---- */
@@ -147,9 +144,6 @@
     color: var(--text); background: #0c0e12; border: 1px solid #394152; border-radius: 8px; padding: 8px 10px; height: 64px;
   }
   #title-editor textarea:focus { border-color: var(--accent); outline: none; }
-  #title-editor .dur-row { display: flex; align-items: center; gap: 8px; }
-  #title-editor .dur-row span { font-size: 12px; color: var(--muted); min-width: 36px; text-align: right; font-variant-numeric: tabular-nums; }
-  #title-editor .dur-row input[type="range"] { flex: 1; width: auto; }
   #title-editor .close-btn {
     position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; padding: 0;
     line-height: 22px; border-radius: 6px; background: rgba(255,255,255,.08); font-size: 14px;
@@ -188,7 +182,7 @@
 <div id="ctrl-bar">
   <button id="capture-btn">&#128247; Capture</button>
   <button id="title-btn" title="Add a silent-film title card (a black, ornate card with text) to build the story">&#65291; Title card</button>
-  <button id="flip-cam" title="Switch to the next camera" disabled>&#8634; Flip camera</button>
+  <button id="flip-cam" title="Switch to the next camera" disabled>&#8634; Next camera</button>
   <label class="ghost-label" title="Overlay the last captured frame at 50% opacity so you can align objects between shots">
     <input type="checkbox" id="ghost-toggle" /> Ghost prev.
   </label>
@@ -197,11 +191,6 @@
     <button id="step-back" title="Previous frame">&#9198;</button>
     <button id="step-fwd" title="Next frame">&#9197;</button>
     <button id="cam-btn" title="Back to live camera view">&#128247; Live</button>
-  </div>
-  <div class="group">
-    <span class="fps-label" style="color:var(--muted);">FPS</span>
-    <input type="range" id="fps" min="1" max="24" step="1" />
-    <span class="fps-val" id="fps-val"></span>
   </div>
   <label class="ghost-label" title="When on, playback wraps back to the first frame; when off, it stops after the last frame">
     <input type="checkbox" id="loop-toggle" checked /> Loop
@@ -219,10 +208,6 @@
         <button class="close-btn" title="Close">&times;</button>
         <label>Card text (max 3 lines, 30 chars each)</label>
         <textarea rows="3" placeholder="Type the card text…"></textarea>
-        <div class="dur-row">
-          <span class="dur-val">3s</span>
-          <input type="range" class="dur-slider" min="0" max="10" step="0.5" value="3" title="How long the card is shown" />
-        </div>
       </div>
     </div>
   </section>
@@ -261,11 +246,9 @@ const KEY_SETTINGS = 'stopmotion.settings.v1';
 const MAX_FRAMES = 500;     // hard cap on the number of frames (images)
 const MAX_SOUNDS = 50;      // hard cap on the number of frames that carry a sound
 const MAX_SOUND_MS = 10000; // sound recordings auto-stop at 10 s
-/* Title cards (silent-film "sign" frames): black, ornate, centered text. */
+/* Title cards (silent-film "sign" frames): black background, centered text. */
 const TITLE_MAX_LINES = 3;
 const TITLE_MAX_CHARS = 30; // per line
-const TITLE_MAX_SECONDS = 10;
-const TITLE_DEFAULT_SECONDS = 3;
 
 let frames = [];            // [{id, url}] in playback order
 /* Publish gating: baseFingerprint is null for an original session (can
@@ -275,7 +258,7 @@ let frames = [];            // [{id, url}] in playback order
 let baseFingerprint = null;
 function workFingerprint() {
   return JSON.stringify(frames.map(f => [
-    isTitleCard(f) ? 'title:' + (f.title || '') + ':' + (f.titleSeconds || 0) : f.url,
+    isTitleCard(f) ? 'title:' + (f.title || '') : f.url,
     f.sound || null, !!f.hold
   ]));
 }
@@ -304,7 +287,7 @@ function limitsError() {
 const stage = $('#stage'), video = $('#camera'), ghostImg = $('#ghost'), canvas = $('#playback');
 const list = $('#frame-list'), statusEl = $('#status');
 const captureBtn = $('#capture-btn'), playBtn = $('#play-btn');
-const fpsSlider = $('#fps'), fpsVal = $('#fps-val'), ghostToggle = $('#ghost-toggle');
+const ghostToggle = $('#ghost-toggle');
 const loopToggle = $('#loop-toggle');
 const pubOverlay = $('#pub-overlay'), pubLink = $('#pub-link');
 
@@ -430,35 +413,24 @@ function titleLines(f) {
   while (raw.length < TITLE_MAX_LINES) raw.push('');
   return raw.map(s => String(s).slice(0, TITLE_MAX_CHARS));
 }
-function titleMs(f) {
-  if (f.type !== 'title' || !settings.fps) return 0;
-  const s = Math.min(TITLE_MAX_SECONDS, Math.max(0, +f.titleSeconds || TITLE_DEFAULT_SECONDS));
-  return Math.round((s * settings.fps) * 1000);   // 1 second = settings.fps frames
-}
 function addTitleCard() {
   if (frames.length >= MAX_FRAMES) {
     setStatus('Frame limit reached (' + MAX_FRAMES + ' frames). Delete some frames to add more.', true);
     return;
   }
-  const f = { id: uid(), type: 'title', title: '', titleSeconds: TITLE_DEFAULT_SECONDS, createdAt: new Date().toISOString() };
+  const f = { id: uid(), type: 'title', title: '', createdAt: new Date().toISOString() };
   const ci = cursorId ? frames.findIndex(x => x.id === cursorId) : -1;
   if (ci >= 0) frames.splice(ci + 1, 0, f); else frames.push(f);
   cursorId = f.id;
   persist(); renderFrames();
   stage.dataset.mode = 'camera';
-  setStatus('Title card added — click it in the reel to type the text and set how long it shows.');
+  setStatus('Title card added — click it in the reel to type the text.');
 }
 function setTitleText(frameId, text) {
   const f = frames.find(x => x.id === frameId);
   if (!f || f.type !== 'title') return;
   const lines = text.split('\n').slice(0, TITLE_MAX_LINES).map(s => s.slice(0, TITLE_MAX_CHARS));
   f.title = lines.join('\n');
-  persist();
-}
-function setTitleDuration(frameId, seconds) {
-  const f = frames.find(x => x.id === frameId);
-  if (!f || f.type !== 'title') return;
-  f.titleSeconds = Math.min(TITLE_MAX_SECONDS, Math.max(0, +seconds));
   persist();
 }
 function capture() {
@@ -542,8 +514,6 @@ function renderFrames() {
 /* ---------- title-card editor overlay (on the stage) ---------- */
 const titleEditor = $('#title-editor');
 const titleTa = titleEditor.querySelector('textarea');
-const titleDurSlider = titleEditor.querySelector('.dur-slider');
-const titleDurVal = titleEditor.querySelector('.dur-val');
 let titleEditorFrameId = null;
 
 function showTitleEditor(frameId) {
@@ -551,8 +521,6 @@ function showTitleEditor(frameId) {
   if (!f || f.type !== 'title') return hideTitleEditor();
   titleEditorFrameId = frameId;
   titleTa.value = f.title || '';
-  titleDurSlider.value = String(f.titleSeconds || TITLE_DEFAULT_SECONDS);
-  titleDurVal.textContent = (f.titleSeconds || TITLE_DEFAULT_SECONDS) + 's';
   titleEditor.classList.add('visible');
 }
 function hideTitleEditor() {
@@ -563,17 +531,6 @@ titleTa.addEventListener('input', () => {
   if (!titleEditorFrameId) return;
   setTitleText(titleEditorFrameId, titleTa.value);
   // Refresh the mini preview in the filmstrip.
-  const f = frames.find(x => x.id === titleEditorFrameId);
-  if (f) {
-    const li = list.querySelector('li[data-id="' + titleEditorFrameId + '"]');
-    const mini = li && li.querySelector('.title-mini');
-    if (mini) drawTitleCard(mini.getContext('2d'), 132, 74, f);
-  }
-});
-titleDurSlider.addEventListener('input', () => {
-  if (!titleEditorFrameId) return;
-  setTitleDuration(titleEditorFrameId, +titleDurSlider.value);
-  titleDurVal.textContent = (+titleDurSlider.value) + 's';
   const f = frames.find(x => x.id === titleEditorFrameId);
   if (f) {
     const li = list.querySelector('li[data-id="' + titleEditorFrameId + '"]');
@@ -610,7 +567,7 @@ async function selectFrame(id) {
     const W = 960, H = 540;
     canvas.width = W; canvas.height = H;
     drawTitleCard(canvas.getContext('2d'), W, H, f);
-    setStatus('Edit the card text and duration in the panel below.');
+    setStatus('Edit the card text in the panel below.');
     return;
   }
   hideTitleEditor();
@@ -696,11 +653,6 @@ ghostToggle.addEventListener('change', () => {
   settings.ghost = ghostToggle.checked;
   persist(); updateGhost();
 });
-fpsSlider.addEventListener('input', () => {
-  settings.fps = +fpsSlider.value;
-  fpsVal.textContent = settings.fps;
-  persist();
-});
 loopToggle.addEventListener('change', () => {
   settings.loop = loopToggle.checked;
   persist();
@@ -726,8 +678,6 @@ $('#flip-cam').addEventListener('click', flipCamera);
 
 /* ---------- init ---------- */
 loadState();
-fpsSlider.value = settings.fps;
-fpsVal.textContent = settings.fps;
 ghostToggle.checked = settings.ghost;
 loopToggle.checked = settings.loop !== false;
 $('#app-version').textContent = APP_VERSION;
@@ -881,7 +831,7 @@ async function buildProjectZip() {
     let ref;
     if (isTitleCard(f)) {
       // Title card: no image file; the text and duration travel in project.json.
-      ref = { id: f.id, type: 'title', title: (f.title || '').split('\n').slice(0, TITLE_MAX_LINES).map(s => s.slice(0, TITLE_MAX_CHARS)), titleSeconds: Math.min(TITLE_MAX_SECONDS, Math.max(0, +f.titleSeconds || TITLE_DEFAULT_SECONDS)) };
+      ref = { id: f.id, type: 'title', title: (f.title || '').split('\n').slice(0, TITLE_MAX_LINES).map(s => s.slice(0, TITLE_MAX_CHARS)) };
     } else {
       const img = parseDataUrl(f.url);
       const imagePath = 'frames/' + n + '.' + extForMime(img.mime);
@@ -917,7 +867,7 @@ async function buildProjectZip() {
       const src = frames.find(f => f.id === ref.id);
       let r;
       if (ref.type === 'title') {
-        r = { type: 'title', title: ref.title, titleSeconds: ref.titleSeconds };
+        r = { type: 'title', title: ref.title };
       } else {
         const img = parseDataUrl(src.url);
         r = { image: ref.image, imageData: 'data:' + img.mime + ';base64,' + img.b64 };
@@ -979,7 +929,7 @@ async function loadProjectFromFiles(files, label) {
     if (ref && ref.type === 'title') {
       // Title card: text + duration come from project.json (no image file).
       const lines = Array.isArray(ref.title) ? ref.title : String(ref.title || '').split('\n');
-      f = { id: uid(), type: 'title', title: lines.slice(0, TITLE_MAX_LINES).map(s => String(s).slice(0, TITLE_MAX_CHARS)).join('\n'), titleSeconds: Math.min(TITLE_MAX_SECONDS, Math.max(0, +ref.titleSeconds || TITLE_DEFAULT_SECONDS)) };
+      f = { id: uid(), type: 'title', title: lines.slice(0, TITLE_MAX_LINES).map(s => String(s).slice(0, TITLE_MAX_CHARS)).join('\n') };
     } else {
       if (!ref || typeof ref.image !== 'string' || !files[ref.image]) throw new Error('Missing image file "' + ((ref && ref.image) || '?') + '" in the archive.');
       f = { id: uid(), url: 'data:' + (ref.mime || 'image/jpeg') + ';base64,' + bytesToB64(files[ref.image]) };
@@ -1004,8 +954,6 @@ async function loadProjectFromFiles(files, label) {
     settings.loop = project.settings.loop !== false;   // older projects default to looping
   }
   cursorId = frames.length ? frames[0].id : null;
-  fpsSlider.value = settings.fps;
-  fpsVal.textContent = settings.fps;
   ghostToggle.checked = settings.ghost;
   loopToggle.checked = settings.loop !== false;
   persist(); renderFrames(); updateGhost();
@@ -1100,107 +1048,14 @@ $('#pub-copy').addEventListener('click', async () => {
 });
 
 /* ---------- playback ---------- */
-/* Draw a title card (silent-film "sign") onto a canvas: black background,
-   ornate corner/side decorations (gold border + white curly scrollwork),
-   centered white text in an old-fashioned serif face, up to 3 lines of 30 chars. */
+/* Draw a title card: black background, centered white text in a serif face,
+   up to 3 lines of 30 chars. */
 function drawTitleCard(ctx, W, H, f) {
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, W, H);
-  const gold = '#c9a24a';
-  const white = '#fff';
-  const u = Math.max(2, Math.min(W, H) / 90);
   const lines = titleLines(f);
   const fontPx = Math.max(11, Math.min(W / 12, H / 6));
   const serif = 'Georgia, "Times New Roman", "Garamond", serif';
-  // Outer + inner border frames
-  ctx.strokeStyle = gold;
-  ctx.lineWidth = Math.max(2, u * 1.4);
-  ctx.strokeRect(u * 2, u * 2, W - u * 4, H - u * 4);
-  ctx.lineWidth = Math.max(1, u * 0.6);
-  ctx.strokeRect(u * 3.4, u * 3.4, W - u * 6.8, H - u * 6.8);
-
-  // ---- white scrollwork ornaments ----
-  ctx.strokeStyle = white;
-  ctx.fillStyle = white;
-  ctx.lineWidth = Math.max(1.5, u * 0.55);
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-
-  /* Corner flourish: two mirrored S-scrolls meeting at the corner,
-     like a classic silent-film card. Drawn for top-left; mirrored
-     via scale for the other three corners. */
-  function corner(cx, cy, sx, sy) {
-    const a = u * 3.2;   // arm length
-    const r = u * 1.4;   // curl radius
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.scale(sx, sy);
-    // Horizontal arm (along the top edge) with a curl at the end
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(a * 0.6, 0);
-    ctx.arc(a * 0.6, r, r, -Math.PI / 2, Math.PI * 0.5, false);
-    ctx.stroke();
-    // Vertical arm (along the left edge) with a curl at the end
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(0, a * 0.6);
-    ctx.arc(r, a * 0.6, r, -Math.PI / 2, Math.PI * 0.5, false);
-    ctx.stroke();
-    // Small leaf between the two arms
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.quadraticCurveTo(a * 0.35, a * 0.35, a * 0.25, a * 0.5);
-    ctx.quadraticCurveTo(a * 0.1, a * 0.35, 0, 0);
-    ctx.fill();
-    ctx.restore();
-  }
-
-  const cm = u * 4.2;
-  corner(cm, cm, 1, 1);
-  corner(W - cm, cm, -1, 1);
-  corner(W - cm, H - cm, -1, -1);
-  corner(cm, H - cm, 1, -1);
-
-  /* Side ornament: two mirrored curls flanking a small filled diamond,
-     placed at the midpoint of each edge. */
-  function side(cx, cy, horizontal) {
-    const a = u * 2.6;   // half-width
-    const r = u * 0.9;   // curl bulge
-    ctx.save();
-    ctx.translate(cx, cy);
-    if (!horizontal) ctx.rotate(Math.PI / 2);
-    // Left curl
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.quadraticCurveTo(-a * 0.4, -r, -a, 0);
-    ctx.quadraticCurveTo(-a * 0.4, r, 0, 0);
-    ctx.stroke();
-    // Right curl
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.quadraticCurveTo(a * 0.4, -r, a, 0);
-    ctx.quadraticCurveTo(a * 0.4, r, 0, 0);
-    ctx.stroke();
-    // Center diamond
-    const d = u * 0.7;
-    ctx.beginPath();
-    ctx.moveTo(0, -d);
-    ctx.lineTo(d, 0);
-    ctx.lineTo(0, d);
-    ctx.lineTo(-d, 0);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-  }
-
-  const sm = u * 4.2;
-  side(W / 2, sm, true);
-  side(W / 2, H - sm, true);
-  side(sm, H / 2, false);
-  side(W - sm, H / 2, false);
-
-  // Centered text
   const nonEmpty = lines.filter(l => l.trim()).length;
   ctx.fillStyle = '#fff';
   ctx.textAlign = 'center';
@@ -1266,30 +1121,16 @@ async function togglePlay() {
 function tick(now) {
   if (!playing) return;
   rafId = requestAnimationFrame(tick);
-  // Title cards advance by their own duration; normal frames obey the
-  // sound-hold gate (a held sound keeps the frame up until the sound ends).
   const cur = frames[playIndex];
-  if (!isTitleCard(cur) && soundHold && !soundHold.ended) return;
+  if (soundHold && !soundHold.ended) return;
   acc += now - lastT; lastT = now;
   const stepMs = 1000 / settings.fps;
   const prevIdx = playIndex;
-  if (isTitleCard(cur)) {
-    // A title card shows for titleMs; advance only once that time has elapsed.
-    // No while-loop here — the card just accumulates time until it's done.
-    const cardMs = titleMs(cur) || stepMs;
-    if (acc >= cardMs) {
-      acc = 0;
-      if (playIndex < frames.length - 1) playIndex++;
-      else if (!settings.loop) { finishAtEnd(); return; }
-      else playIndex = 0;
-    }
-  } else {
-    while (acc >= stepMs) {
-      acc -= stepMs;
-      if (playIndex < frames.length - 1) playIndex++;
-      else if (!settings.loop) { finishAtEnd(); return; }
-      else playIndex = 0;
-    }
+  while (acc >= stepMs) {
+    acc -= stepMs;
+    if (playIndex < frames.length - 1) playIndex++;
+    else if (!settings.loop) { finishAtEnd(); return; }
+    else playIndex = 0;
   }
   drawFrame(playIndex);
   if (playIndex !== prevIdx) playFrameSound(playIndex);
