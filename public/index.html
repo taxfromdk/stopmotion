@@ -32,7 +32,7 @@
   }
   header h1 { font-size: 18px; margin: 0; letter-spacing: .3px; }
   .header-right { display: flex; align-items: center; gap: 10px; }
-  #capture-bar {
+  #capture-bar, #playback-bar {
     display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
     padding: 8px 16px; border-bottom: 1px solid #2e3440; background: var(--panel);
   }
@@ -57,14 +57,6 @@
   #flash {
     position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 5;
   }
-  #ctrl-box {
-    position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 4;
-    display: flex; flex-direction: column; align-items: center; gap: 6px;
-    max-width: calc(100% - 24px); padding: 8px 14px;
-    background: rgba(8, 10, 14, .6); border: 1px solid rgba(255,255,255,.09); border-radius: 14px;
-    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-  }
-  #ctrl-box .group { background: transparent; padding: 0; }
   #flash.on { animation: flash .25s ease-out; }
   @keyframes flash { from { opacity: .8; } to { opacity: 0; } }
 
@@ -83,7 +75,7 @@
   input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; }
   input[type="range"] { accent-color: var(--accent); width: 110px; }
   .fps-val { min-width: 42px; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
-  #status { min-height: 20px; font-size: 13.5px; color: var(--muted); text-align: center; max-width: 860px; }
+  #status { font-size: 13.5px; color: var(--muted); min-width: 200px; }
   #status.error { color: var(--danger); }
 
   /* ---- reel (bottom strip) ---- */
@@ -167,6 +159,23 @@
     <input type="checkbox" id="ghost-toggle" /> Ghost previous (50%)
   </label>
 </div>
+<div id="playback-bar">
+  <div class="group">
+    <button id="play-btn">&#9654; Play</button>
+    <button id="step-back" title="Previous frame">&#9198;</button>
+    <button id="step-fwd" title="Next frame">&#9197;</button>
+    <button id="cam-btn" title="Back to live camera view">&#128247; Live</button>
+  </div>
+  <div class="group">
+    <span style="font-size:13px;color:var(--muted);">FPS</span>
+    <input type="range" id="fps" min="1" max="24" step="1" />
+    <span class="fps-val" id="fps-val"></span>
+  </div>
+  <label class="ghost-label" title="When on, playback wraps back to the first frame; when off, it stops after the last frame">
+    <input type="checkbox" id="loop-toggle" checked /> Loop
+  </label>
+  <div id="status"></div>
+</div>
 <main>
   <section id="stage-panel">
     <div id="stage" data-mode="camera">
@@ -174,25 +183,6 @@
       <img id="ghost" alt="" draggable="false" />
       <canvas id="playback"></canvas>
       <div id="flash"></div>
-      <div id="ctrl-box">
-        <div class="controls">
-          <div class="group">
-            <button id="play-btn">&#9654; Play</button>
-            <button id="step-back" title="Previous frame">&#9198;</button>
-            <button id="step-fwd" title="Next frame">&#9197;</button>
-            <button id="cam-btn" title="Back to live camera view">&#128247; Live</button>
-          </div>
-          <div class="group">
-            <span style="font-size:13px;color:var(--muted);">FPS</span>
-            <input type="range" id="fps" min="1" max="24" step="1" />
-            <span class="fps-val" id="fps-val"></span>
-          </div>
-          <label class="ghost-label" title="When on, playback wraps back to the first frame; when off, it stops after the last frame">
-            <input type="checkbox" id="loop-toggle" checked /> Loop
-          </label>
-        </div>
-        <div id="status"></div>
-      </div>
     </div>
   </section>
 
