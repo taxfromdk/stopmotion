@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="color-scheme" content="dark" />
-<title>Stop Motion Studio</title>
+<title>flic.dk</title>
 <style>
   :root {
     --bg: #16191f;
@@ -32,6 +32,10 @@
   }
   header h1 { font-size: 18px; margin: 0; letter-spacing: .3px; }
   .header-right { display: flex; align-items: center; gap: 10px; }
+  #capture-bar {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 8px 16px; border-bottom: 1px solid #2e3440; background: var(--panel);
+  }
   main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 
   /* ---- stage (full-bleed) ---- */
@@ -147,7 +151,7 @@
 <body>
 <input type="file" id="project-file" accept=".zip,application/zip,application/x-zip-compressed" hidden />
 <header>
-  <h1>&#127916; Stop Motion Studio</h1>
+  <h1>&#127916; flic.dk</h1>
   <div class="header-right">
     <span id="storage-info" style="color:var(--muted);font-size:13px;"></span>
     <span id="app-version" title="App version" style="color:var(--muted);font-size:12.5px;font-variant-numeric:tabular-nums;"></span>
@@ -156,6 +160,13 @@
     <button id="load-project-btn" title="Upload a previously downloaded .zip project file">&#128194; Upload project&#8230;</button>
   </div>
 </header>
+<div id="capture-bar">
+  <button id="capture-btn">&#128247; Capture frame</button>
+  <button id="flip-cam" title="Switch to the next camera" disabled>&#8634; Flip camera</button>
+  <label class="ghost-label" title="Overlay the last captured frame at 50% opacity so you can align objects between shots">
+    <input type="checkbox" id="ghost-toggle" /> Ghost previous (50%)
+  </label>
+</div>
 <main>
   <section id="stage-panel">
     <div id="stage" data-mode="camera">
@@ -164,14 +175,6 @@
       <canvas id="playback"></canvas>
       <div id="flash"></div>
       <div id="ctrl-box">
-        <div class="controls">
-          <button id="capture-btn">&#128247; Capture frame</button>
-          <button id="retry-cam" title="Request camera access again">&#128247; Retry camera</button>
-          <button id="flip-cam" title="Switch to the next camera" disabled>&#8634; Flip camera</button>
-          <label class="ghost-label" title="Overlay the last captured frame at 50% opacity so you can align objects between shots">
-            <input type="checkbox" id="ghost-toggle" /> Ghost previous (50%)
-          </label>
-        </div>
         <div class="controls">
           <div class="group">
             <button id="play-btn">&#9654; Play</button>
@@ -224,6 +227,9 @@ const $ = s => document.querySelector(s);
 const APP_VERSION = '1.0';
 const KEY_FRAMES = 'stopmotion.frames.v1';
 const KEY_SETTINGS = 'stopmotion.settings.v1';
+const MAX_FRAMES = 500;     // hard cap on the number of frames (images)
+const MAX_SOUNDS = 50;      // hard cap on the number of frames that carry a sound
+const MAX_SOUND_MS = 10000; // sound recordings auto-stop at 10 s
 
 let frames = [];            // [{id, url}] in playback order
 /* Publish gating: baseFingerprint is null for an original session (can
@@ -245,6 +251,16 @@ let recording = null;          // {frameId, rec, auto} while a frame sound is be
 const activeAudios = [];       // spawned players currently sounding (overlaps allowed)
 let soundHold = null;          // audio element holding playback in "hold for sounds" mode
 let cursorId = null;           // selected frame id — new captures insert right after it
+
+/* Returns an error string if the current frames exceed the hard limits
+   (checked again at publish time, since a loaded/uploaded project may
+   predate a limit). Otherwise null. */
+function limitsError() {
+  if (frames.length > MAX_FRAMES) return 'This project has ' + frames.length + ' frames — the limit is ' + MAX_FRAMES + '. Delete some frames first.';
+  const sounds = frames.filter(f => f.sound).length;
+  if (sounds > MAX_SOUNDS) return 'This project has ' + sounds + ' sounds — the limit is ' + MAX_SOUNDS + '. Remove some sounds first.';
+  return null;
+}
 
 const stage = $('#stage'), video = $('#camera'), ghostImg = $('#ghost'), canvas = $('#playback');
 const list = $('#frame-list'), statusEl = $('#status');
@@ -338,11 +354,11 @@ async function startCamera() {
     captureBtn.disabled = true;
     let msg = 'Camera unavailable (' + err.name + ').';
     if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-      msg = 'Camera permission was denied. Click the camera icon in the address bar, allow access for this site, then press "Retry camera".';
+      msg = 'Camera permission was denied. Click the camera icon in the address bar, allow access for this site, and reload the page.';
     } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
       msg = 'No camera device was found on this machine.';
     } else if (err.name === 'NotReadableError') {
-      msg = 'The camera is in use by another application. Close it, then press "Retry camera".';
+      msg = 'The camera is in use by another application. Close it and reload the page.';
     }
     setStatus(msg, true);
   }
@@ -365,6 +381,10 @@ function updateGhost() {           // camera mode: the frame before the next sho
   showGhost(frames.length ? frames[frames.length - 1].url : null);
 }
 function capture() {
+  if (frames.length >= MAX_FRAMES) {
+    setStatus('Frame limit reached (' + MAX_FRAMES + ' frames). Delete some frames to capture more.', true);
+    return;
+  }
   if (!video.videoWidth || !video.videoHeight) return;
   let w = video.videoWidth, h = video.videoHeight;
   const s = Math.min(1, 1280 / w, 720 / h);
@@ -372,7 +392,7 @@ function capture() {
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
   c.getContext('2d').drawImage(video, 0, 0, w, h);
-  const f = { id: uid(), url: c.toDataURL('image/jpeg', 0.75) };
+  const f = { id: uid(), url: c.toDataURL('image/jpeg', 0.75), createdAt: new Date().toISOString() };
   const ci = cursorId ? frames.findIndex(x => x.id === cursorId) : -1;
   if (ci >= 0) frames.splice(ci + 1, 0, f); else frames.push(f);
   cursorId = f.id;
@@ -539,7 +559,6 @@ $('#clear-btn').addEventListener('click', () => {
 });
 
 captureBtn.addEventListener('click', capture);
-$('#retry-cam').addEventListener('click', startCamera);
 function flipCamera() {
   if (camDevices.length < 2) return;
   camIndex = (camIndex + 1) % camDevices.length;
@@ -626,6 +645,11 @@ function toggleHold(frameId) {
 async function startRecording(frameId) {
   if (recording) { stopRecording(); return; }
   if (typeof MediaRecorder === 'undefined') return setStatus('MediaRecorder is not supported in this browser.', true);
+  const alreadyHasSound = frames.some(f => f.sound && f.id !== frameId);
+  if (alreadyHasSound && frames.filter(f => f.sound).length >= MAX_SOUNDS) {
+    setStatus('Sound limit reached (' + MAX_SOUNDS + ' frames with sound). Remove a sound to record another.', true);
+    return;
+  }
   let micStream;
   try {
     micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -651,9 +675,9 @@ async function startRecording(frameId) {
     reader.readAsDataURL(blob);
   };
   rec.start(250);
-  recording = { frameId, rec, auto: setTimeout(stopRecording, 20000) };
+  recording = { frameId, rec, auto: setTimeout(stopRecording, MAX_SOUND_MS) };
   renderFrames();
-  setStatus('Recording sound… click ■ Stop on the frame to finish (auto-stops at 20 s).');
+  setStatus('Recording sound… click ■ Stop on the frame to finish (auto-stops at 10 s).');
 }
 function stopRecording() {
   if (!recording) return;
@@ -700,6 +724,7 @@ async function buildProjectZip() {
     const imagePath = 'frames/' + n + '.' + extForMime(img.mime);
     entries.push({ name: imagePath, data: b64ToBytes(img.b64) });
     const ref = { id: f.id, image: imagePath, mime: img.mime };
+    if (f.createdAt) ref.createdAt = f.createdAt;
     if (f.sound) {
       const snd = parseDataUrl(f.sound);
       ref.sound = { path: 'sounds/' + n + '.' + extForMime(snd.mime), mime: snd.mime };
@@ -737,7 +762,7 @@ async function buildProjectZip() {
   };
   entries.push({ name: 'film-data.js', data: new TextEncoder().encode('window.__FILM_DATA__ = ' + JSON.stringify(filmData) + ';\n') });
   entries.push({ name: 'README.txt', data: new TextEncoder().encode(
-    'Stop Motion Studio — ' + frames.length + ' frame(s) at ' + settings.fps + ' fps\n' +
+    'flic.dk — ' + frames.length + ' frame(s) at ' + settings.fps + ' fps\n' +
     '\n' +
     'To watch this film offline (no internet needed):\n' +
     '  1. Unzip this archive into a folder.\n' +
@@ -774,7 +799,7 @@ async function saveProject() {
 /* Shared by file loading and forking: validates and applies a project.
    Returns the number of frames loaded. */
 async function loadProjectFromFiles(files, label) {
-  if (!files['project.json']) throw new Error('No project.json found — is this a Stop Motion Studio project?');
+  if (!files['project.json']) throw new Error('No project.json found — is this a flic.dk project?');
   const project = JSON.parse(new TextDecoder().decode(files['project.json']));
   if (project.format !== 'stopmotion-project' || !Array.isArray(project.frames)) throw new Error('Unrecognized project file.');
   if (typeof project.version === 'number' && project.version > 1) throw new Error('Project version ' + project.version + ' is newer than this app supports.');
@@ -782,6 +807,7 @@ async function loadProjectFromFiles(files, label) {
   for (const ref of project.frames) {
     if (!ref || typeof ref.image !== 'string' || !files[ref.image]) throw new Error('Missing image file "' + ((ref && ref.image) || '?') + '" in the archive.');
     let f = { id: uid(), url: 'data:' + (ref.mime || 'image/jpeg') + ';base64,' + bytesToB64(files[ref.image]) };
+    if (ref.createdAt) f.createdAt = ref.createdAt;
     if (ref.sound) {
       if (!files[ref.sound.path]) throw new Error('Missing sound file "' + ref.sound.path + '" in the archive.');
       f.sound = 'data:' + (ref.sound.mime || 'audio/webm') + ';base64,' + bytesToB64(files[ref.sound.path]);
@@ -849,6 +875,8 @@ async function loadFork(code) {
 /* ---------- publishing ---------- */
 async function publishProject() {
   if (!frames.length) { setStatus('Capture some frames before publishing.', true); return; }
+  const limErr = limitsError();
+  if (limErr) { setStatus(limErr, true); return; }
   if (baseFingerprint !== null && workFingerprint() === baseFingerprint) {
     setStatus('Make a change first — you can\'t publish an unmodified copy.', true); return;
   }

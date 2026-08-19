@@ -14,6 +14,8 @@
 const KEY_PREFIX = 'projects/';
 const MAX_UPLOAD = 50 * 1024 * 1024; // 50 MB per project
 const CODE_LEN = 5;
+const MAX_FRAMES = 500; // hard cap: number of frames (images) per project
+const MAX_SOUNDS = 50;  // hard cap: number of frames carrying a sound
 // Admin credentials ("login:password"), checked against the x-admin-auth
 // header. Keep in sync with public/admin.html.
 const ADMIN_AUTH = 'flic:stopmotion';
@@ -74,7 +76,7 @@ function notFoundPage(code) {
     '<h1>\u{1F3AC} This work does not exist</h1>' +
     '<p>The code <code>' + code + '</code> does not match any published work. ' +
     'The link may be mistyped, or the work may have been deleted.</p>' +
-    '<p><a href="/">&#8592; Back to Stop Motion Studio</a></p>' +
+    '<p><a href="/">&#8592; Back to flic.dk</a></p>' +
     '</main></body></html>';
   return new Response(html, {
     status: 404,
@@ -131,6 +133,11 @@ function validateProjectZip(bytes) {
   if (!Array.isArray(project.frames) || !project.frames.length) return 'Project has no frames.';
   if (typeof project.version === 'number' && project.version > 1) {
     return 'Project version ' + project.version + ' is not supported.';
+  }
+  // Hard caps on project size (kept in sync with the editor).
+  if (project.frames.length > MAX_FRAMES) return 'Project has ' + project.frames.length + ' frames — the limit is ' + MAX_FRAMES + '.';
+  if (project.frames.filter(r => r && r.sound && r.sound.path).length > MAX_SOUNDS) {
+    return 'Project has ' + project.frames.filter(r => r && r.sound && r.sound.path).length + ' sounds — the limit is ' + MAX_SOUNDS + '.';
   }
   // Every frame's image must exist and be a valid image; sounds must be valid.
   for (const ref of project.frames) {

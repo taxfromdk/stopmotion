@@ -1,4 +1,4 @@
-# Stop Motion Studio
+# flic.dk
 
 A browser-based stop-motion studio in a single page, plus a Cloudflare Worker
 backend that lets anyone publish their work to a shareable 5-letter link
@@ -34,6 +34,12 @@ backend that lets anyone publish their work to a shareable 5-letter link
   if `project.json` is missing/invalid, any image fails a magic-byte check
   (JPEG/PNG/GIF/WebP), any sound fails a magic-byte check (WebM/MP4/WAV/OGG),
   or the archive contains unexpected extra files.
+- **Project limits** (checked in the editor and re-checked on publish): a
+  project is capped at **500 frames** and **50 sounds**, and each sound
+  recording auto-stops at **10 seconds**. The caps are enforced in the UI
+  (capture/record are blocked with an explanatory message) and again in the
+  worker's `validateProjectZip`, so a hand-crafted or outdated project can't
+  exceed them.
 - **Publish gating**: an original session can publish once it has at least
   one frame. A forked or uploaded project cannot be republished until it has
   been changed (the work's fingerprint is compared against the loaded
