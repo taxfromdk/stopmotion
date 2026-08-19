@@ -1,0 +1,11 @@
+# Never upload these as static assets (belt and braces — assets come from public/ only)
+.git/
+.qwen/
+.wrangler/
+src/
+node_modules/
+wrangler.jsonc
+.wranglerignore
+.gitignore
+README.md
+todo.txt

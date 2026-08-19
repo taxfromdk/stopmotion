@@ -1,5 +1,6 @@
 # Local tooling / agent config
 .qwen/
+.wrangler/
 
 # OS junk
 .DS_Store
