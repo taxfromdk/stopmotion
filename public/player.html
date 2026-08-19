@@ -110,58 +110,71 @@ function drawTitleCard(ctx, W, H, f) {
   ctx.strokeRect(u * 2, u * 2, W - u * 4, H - u * 4);
   ctx.lineWidth = Math.max(1, u * 0.6);
   ctx.strokeRect(u * 3.4, u * 3.4, W - u * 6.8, H - u * 6.8);
-  // Curly white scrollwork ornaments
+  // ---- white scrollwork ornaments ----
   ctx.strokeStyle = white;
   ctx.fillStyle = white;
-  ctx.lineWidth = Math.max(1.5, u * 0.5);
+  ctx.lineWidth = Math.max(1.5, u * 0.55);
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  const scroll = (cx, cy, rot) => {
+  function corner(cx, cy, sx, sy) {
+    const a = u * 3.2;
+    const r = u * 1.4;
     ctx.save();
     ctx.translate(cx, cy);
-    ctx.rotate(rot);
+    ctx.scale(sx, sy);
     ctx.beginPath();
-    const r1 = u * 1.2, r2 = u * 0.7, r3 = u * 0.4;
     ctx.moveTo(0, 0);
-    ctx.arc(0, 0, r1, Math.PI, Math.PI * 1.5, false);
-    ctx.arc(r1 * 0.5, r1 * 0.5, r2, Math.PI * 1.5, Math.PI * 2.2, false);
-    ctx.arc(r1 * 0.3, r1 * 0.3, r3, Math.PI * 2.2, Math.PI * 2.8, false);
+    ctx.lineTo(a * 0.6, 0);
+    ctx.arc(a * 0.6, r, r, -Math.PI / 2, Math.PI * 0.5, false);
     ctx.stroke();
     ctx.beginPath();
-    ctx.arc(0, 0, u * 0.3, 0, Math.PI * 2);
+    ctx.moveTo(0, 0);
+    ctx.lineTo(0, a * 0.6);
+    ctx.arc(r, a * 0.6, r, -Math.PI / 2, Math.PI * 0.5, false);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(a * 0.35, a * 0.35, a * 0.25, a * 0.5);
+    ctx.quadraticCurveTo(a * 0.1, a * 0.35, 0, 0);
     ctx.fill();
     ctx.restore();
-  };
-  const cm = u * 4.5;
-  scroll(cm, cm, 0);
-  scroll(W - cm, cm, Math.PI / 2);
-  scroll(W - cm, H - cm, Math.PI);
-  scroll(cm, H - cm, -Math.PI / 2);
-  const sm = u * 3;
-  const sr = u * 1.0;
-  const sideCurl = (tx, ty, rot) => {
+  }
+  const cm = u * 4.2;
+  corner(cm, cm, 1, 1);
+  corner(W - cm, cm, -1, 1);
+  corner(W - cm, H - cm, -1, -1);
+  corner(cm, H - cm, 1, -1);
+  function side(cx, cy, horizontal) {
+    const a = u * 2.6;
+    const r = u * 0.9;
     ctx.save();
-    ctx.translate(tx, ty);
-    if (rot) ctx.rotate(rot);
+    ctx.translate(cx, cy);
+    if (!horizontal) ctx.rotate(Math.PI / 2);
     ctx.beginPath();
-    ctx.moveTo(-sr * 2, 0);
-    ctx.arc(-sr, 0, sr, Math.PI, Math.PI * 2, false);
-    ctx.arc(0, 0, sr * 0.6, 0, Math.PI, false);
-    ctx.arc(sr * 0.5, 0, sr * 0.35, Math.PI, 0, true);
+    ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(-a * 0.4, -r, -a, 0);
+    ctx.quadraticCurveTo(-a * 0.4, r, 0, 0);
     ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(a * 0.4, -r, a, 0);
+    ctx.quadraticCurveTo(a * 0.4, r, 0, 0);
+    ctx.stroke();
+    const d = u * 0.7;
+    ctx.beginPath();
+    ctx.moveTo(0, -d);
+    ctx.lineTo(d, 0);
+    ctx.lineTo(0, d);
+    ctx.lineTo(-d, 0);
+    ctx.closePath();
+    ctx.fill();
     ctx.restore();
-  };
-  sideCurl(W / 2, cm, 0);
-  sideCurl(W / 2, H - cm, 0);
-  sideCurl(cm, H / 2, Math.PI / 2);
-  sideCurl(W - cm, H / 2, Math.PI / 2);
-  // Diamond accents at the side midpoints (gold, smaller)
-  ctx.fillStyle = gold;
-  const dia = (x, y, r) => { ctx.beginPath(); ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath(); ctx.fill(); };
-  dia(W / 2, u * 2.5, u * 0.9);
-  dia(W / 2, H - u * 2.5, u * 0.9);
-  dia(u * 2.5, H / 2, u * 0.9);
-  dia(W - u * 2.5, H / 2, u * 0.9);
+  }
+  const sm = u * 4.2;
+  side(W / 2, sm, true);
+  side(W / 2, H - sm, true);
+  side(sm, H / 2, false);
+  side(W - sm, H / 2, false);
   const nonEmpty = lines.filter(l => l.trim()).length;
   ctx.fillStyle = '#fff';
   ctx.textAlign = 'center';

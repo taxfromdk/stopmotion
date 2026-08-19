@@ -255,7 +255,7 @@
 (() => {
 'use strict';
 const $ = s => document.querySelector(s);
-const APP_VERSION = 'd77d6ec';
+const APP_VERSION = 'd5361e8';
 const KEY_FRAMES = 'stopmotion.frames.v1';
 const KEY_SETTINGS = 'stopmotion.settings.v1';
 const MAX_FRAMES = 500;     // hard cap on the number of frames (images)
@@ -1119,93 +1119,86 @@ function drawTitleCard(ctx, W, H, f) {
   ctx.lineWidth = Math.max(1, u * 0.6);
   ctx.strokeRect(u * 3.4, u * 3.4, W - u * 6.8, H - u * 6.8);
 
-  // Curly white scrollwork ornaments
+  // ---- white scrollwork ornaments ----
   ctx.strokeStyle = white;
   ctx.fillStyle = white;
-  ctx.lineWidth = Math.max(1.5, u * 0.5);
+  ctx.lineWidth = Math.max(1.5, u * 0.55);
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
 
-  // Draw a single curly scroll (spiral flourish) at (cx, cy) with a rotation.
-  const scroll = (cx, cy, rot) => {
+  /* Corner flourish: two mirrored S-scrolls meeting at the corner,
+     like a classic silent-film card. Drawn for top-left; mirrored
+     via scale for the other three corners. */
+  function corner(cx, cy, sx, sy) {
+    const a = u * 3.2;   // arm length
+    const r = u * 1.4;   // curl radius
     ctx.save();
     ctx.translate(cx, cy);
-    ctx.rotate(rot);
+    ctx.scale(sx, sy);
+    // Horizontal arm (along the top edge) with a curl at the end
     ctx.beginPath();
-    // Main curl: a small spiral made of arcs
-    const r1 = u * 1.2, r2 = u * 0.7, r3 = u * 0.4;
     ctx.moveTo(0, 0);
-    ctx.arc(0, 0, r1, Math.PI, Math.PI * 1.5, false);
-    ctx.arc(r1 * 0.5, r1 * 0.5, r2, Math.PI * 1.5, Math.PI * 2.2, false);
-    ctx.arc(r1 * 0.3, r1 * 0.3, r3, Math.PI * 2.2, Math.PI * 2.8, false);
+    ctx.lineTo(a * 0.6, 0);
+    ctx.arc(a * 0.6, r, r, -Math.PI / 2, Math.PI * 0.5, false);
     ctx.stroke();
-    // A small dot at the center
+    // Vertical arm (along the left edge) with a curl at the end
     ctx.beginPath();
-    ctx.arc(0, 0, u * 0.3, 0, Math.PI * 2);
+    ctx.moveTo(0, 0);
+    ctx.lineTo(0, a * 0.6);
+    ctx.arc(r, a * 0.6, r, -Math.PI / 2, Math.PI * 0.5, false);
+    ctx.stroke();
+    // Small leaf between the two arms
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(a * 0.35, a * 0.35, a * 0.25, a * 0.5);
+    ctx.quadraticCurveTo(a * 0.1, a * 0.35, 0, 0);
     ctx.fill();
     ctx.restore();
-  };
+  }
 
-  // Corner scrolls: four corners, each rotated to face inward
-  const cm = u * 4.5;
-  scroll(cm, cm, 0);
-  scroll(W - cm, cm, Math.PI / 2);
-  scroll(W - cm, H - cm, Math.PI);
-  scroll(cm, H - cm, -Math.PI / 2);
+  const cm = u * 4.2;
+  corner(cm, cm, 1, 1);
+  corner(W - cm, cm, -1, 1);
+  corner(W - cm, H - cm, -1, -1);
+  corner(cm, H - cm, 1, -1);
 
-  // Side mid-point curls (top, bottom, left, right)
-  const sm = u * 3;
-  // Top center
-  ctx.save();
-  ctx.translate(W / 2, cm);
-  ctx.beginPath();
-  const sr = u * 1.0;
-  ctx.moveTo(-sr * 2, 0);
-  ctx.arc(-sr, 0, sr, Math.PI, Math.PI * 2, false);
-  ctx.arc(0, 0, sr * 0.6, 0, Math.PI, false);
-  ctx.arc(sr * 0.5, 0, sr * 0.35, Math.PI, 0, true);
-  ctx.stroke();
-  ctx.restore();
-  // Bottom center
-  ctx.save();
-  ctx.translate(W / 2, H - cm);
-  ctx.beginPath();
-  ctx.moveTo(-sr * 2, 0);
-  ctx.arc(-sr, 0, sr, Math.PI, Math.PI * 2, false);
-  ctx.arc(0, 0, sr * 0.6, 0, Math.PI, false);
-  ctx.arc(sr * 0.5, 0, sr * 0.35, Math.PI, 0, true);
-  ctx.stroke();
-  ctx.restore();
-  // Left center
-  ctx.save();
-  ctx.translate(cm, H / 2);
-  ctx.rotate(Math.PI / 2);
-  ctx.beginPath();
-  ctx.moveTo(-sr * 2, 0);
-  ctx.arc(-sr, 0, sr, Math.PI, Math.PI * 2, false);
-  ctx.arc(0, 0, sr * 0.6, 0, Math.PI, false);
-  ctx.arc(sr * 0.5, 0, sr * 0.35, Math.PI, 0, true);
-  ctx.stroke();
-  ctx.restore();
-  // Right center
-  ctx.save();
-  ctx.translate(W - cm, H / 2);
-  ctx.rotate(Math.PI / 2);
-  ctx.beginPath();
-  ctx.moveTo(-sr * 2, 0);
-  ctx.arc(-sr, 0, sr, Math.PI, Math.PI * 2, false);
-  ctx.arc(0, 0, sr * 0.6, 0, Math.PI, false);
-  ctx.arc(sr * 0.5, 0, sr * 0.35, Math.PI, 0, true);
-  ctx.stroke();
-  ctx.restore();
+  /* Side ornament: two mirrored curls flanking a small filled diamond,
+     placed at the midpoint of each edge. */
+  function side(cx, cy, horizontal) {
+    const a = u * 2.6;   // half-width
+    const r = u * 0.9;   // curl bulge
+    ctx.save();
+    ctx.translate(cx, cy);
+    if (!horizontal) ctx.rotate(Math.PI / 2);
+    // Left curl
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(-a * 0.4, -r, -a, 0);
+    ctx.quadraticCurveTo(-a * 0.4, r, 0, 0);
+    ctx.stroke();
+    // Right curl
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(a * 0.4, -r, a, 0);
+    ctx.quadraticCurveTo(a * 0.4, r, 0, 0);
+    ctx.stroke();
+    // Center diamond
+    const d = u * 0.7;
+    ctx.beginPath();
+    ctx.moveTo(0, -d);
+    ctx.lineTo(d, 0);
+    ctx.lineTo(0, d);
+    ctx.lineTo(-d, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
 
-  // Diamond accents at the side midpoints (gold, smaller)
-  ctx.fillStyle = gold;
-  const dia = (x, y, r) => { ctx.beginPath(); ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath(); ctx.fill(); };
-  dia(W / 2, u * 2.5, u * 0.9);
-  dia(W / 2, H - u * 2.5, u * 0.9);
-  dia(u * 2.5, H / 2, u * 0.9);
-  dia(W - u * 2.5, H / 2, u * 0.9);
+  const sm = u * 4.2;
+  side(W / 2, sm, true);
+  side(W / 2, H - sm, true);
+  side(sm, H / 2, false);
+  side(W - sm, H / 2, false);
 
   // Centered text
   const nonEmpty = lines.filter(l => l.trim()).length;
