@@ -1273,27 +1273,30 @@ async function togglePlay() {
 function tick(now) {
   if (!playing) return;
   rafId = requestAnimationFrame(tick);
-  // A title card advances by its own duration (titleMs), not by the sound-hold
-  // gate — otherwise a sound that errors or never fires `ended` holds the card
-  // forever. Normal frames still obey the sound-hold gate.
+  // Title cards advance by their own duration; normal frames obey the
+  // sound-hold gate (a held sound keeps the frame up until the sound ends).
   const cur = frames[playIndex];
   if (!isTitleCard(cur) && soundHold && !soundHold.ended) return;
   acc += now - lastT; lastT = now;
   const stepMs = 1000 / settings.fps;
   const prevIdx = playIndex;
-  while (acc >= stepMs) {
-    acc -= stepMs;
-    const cur2 = frames[playIndex];
-    if (isTitleCard(cur2)) {
-      // A title card shows for its duration (titleSeconds); bank the time and
-      // hold the card, advancing only when it has been shown long enough.
-      acc = Math.min(acc + stepMs, titleMs(cur2) || stepMs);
-      if (acc < stepMs) break;   // card still showing — wait for more time
-      continue;
+  if (isTitleCard(cur)) {
+    // A title card shows for titleMs; advance only once that time has elapsed.
+    // No while-loop here — the card just accumulates time until it's done.
+    const cardMs = titleMs(cur) || stepMs;
+    if (acc >= cardMs) {
+      acc = 0;
+      if (playIndex < frames.length - 1) playIndex++;
+      else if (!settings.loop) { finishAtEnd(); return; }
+      else playIndex = 0;
     }
-    if (playIndex < frames.length - 1) playIndex++;
-    else if (!settings.loop) { finishAtEnd(); return; }   // play-once: stop after the last frame
-    else playIndex = 0;                                    // loop: wrap back to the first
+  } else {
+    while (acc >= stepMs) {
+      acc -= stepMs;
+      if (playIndex < frames.length - 1) playIndex++;
+      else if (!settings.loop) { finishAtEnd(); return; }
+      else playIndex = 0;
+    }
   }
   drawFrame(playIndex);
   if (playIndex !== prevIdx) playFrameSound(playIndex);

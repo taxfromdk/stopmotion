@@ -202,23 +202,28 @@ function playFrameSound(i) {
 function tick(now) {
   if (!playing) return;
   rafId = requestAnimationFrame(tick);
-  // Title cards advance by their own duration, not the sound-hold gate.
+  // Title cards advance by their own duration; normal frames obey the
+  // sound-hold gate.
   const cur = frames[playIndex];
   if (!isTitleCard(cur) && soundHold && !soundHold.ended) return;
   acc += now - lastT; lastT = now;
   const stepMs = 1000 / settings.fps;
   const prevIdx = playIndex;
-  while (acc >= stepMs) {
-    acc -= stepMs;
-    const cur2 = frames[playIndex];
-    if (isTitleCard(cur2)) {
-      acc = Math.min(acc + stepMs, titleMs(cur2) || stepMs);
-      if (acc < stepMs) break;
-      continue;
+  if (isTitleCard(cur)) {
+    const cardMs = titleMs(cur) || stepMs;
+    if (acc >= cardMs) {
+      acc = 0;
+      if (playIndex < frames.length - 1) playIndex++;
+      else if (!settings.loop) { pause(); return; }
+      else playIndex = 0;
     }
-    if (playIndex < frames.length - 1) playIndex++;
-    else if (!settings.loop) { pause(); return; }
-    else playIndex = 0;
+  } else {
+    while (acc >= stepMs) {
+      acc -= stepMs;
+      if (playIndex < frames.length - 1) playIndex++;
+      else if (!settings.loop) { pause(); return; }
+      else playIndex = 0;
+    }
   }
   drawFrame(playIndex);
   if (playIndex !== prevIdx) playFrameSound(playIndex);
