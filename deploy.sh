@@ -47,5 +47,12 @@ rm -f "${TARGET}.bak"
 
 echo "Stamped APP_VERSION = '${VERSION}' in ${TARGET}"
 
+# --- 2b. Write version.json (gitignored, generated per deploy) ----------
+# Clients poll this to detect that a newer version is live and show a
+# "reload to update" notice (stale tabs can stay open for days).
+printf '{"version":"%s","deployedAt":"%s"}\n' \
+  "$VERSION" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > public/version.json
+echo "Wrote public/version.json"
+
 # --- 3. Deploy ----------------------------------------------------------
 npx wrangler deploy "$@"

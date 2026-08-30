@@ -127,6 +127,10 @@
   #clear-btn { color: #ffb3b3; border-color: #5a2b2b; padding: 5px 10px; font-size: 12.5px; }
   #clear-btn:hover:not(:disabled) { background: var(--danger); color: #fff; border-color: transparent; }
 
+  /* ---- update notice ---- */
+  #update-notice { background: #7a5a1f; border-color: #b08a3e; font-weight: 600; }
+  #update-notice:hover { background: #8f6a25; }
+
   /* ---- publish ---- */
   #publish-btn { background: #2e7d5b; border-color: #3d9970; font-weight: 600; padding: 7px 14px; }
   #publish-btn:hover:not(:disabled) { background: #379268; }
@@ -209,6 +213,7 @@
   <div class="header-right">
     <span id="storage-info" style="color:var(--muted);font-size:13px;"></span>
     <span id="app-version" title="App version" style="color:var(--muted);font-size:12.5px;font-variant-numeric:tabular-nums;"></span>
+    <button id="update-notice" hidden title="A newer version of the app is live — click to reload and get it. Your frames are saved and will still be here.">&#8635; Update available</button>
     <button id="publish-btn" title="Publish your work on the web — anyone with the link will be able to see it. Get a shareable link.">&#128640; Publish</button>
     <button id="load-code-btn" title="Load a shared work from its 5-letter code (e.g. qzmnx)">&#128194; Load flic&#8230;</button>
     <button id="save-project-btn" title="Download the whole project (structure + images + sounds) as a .zip file">&#128190; Download project</button>
@@ -291,7 +296,7 @@
 (() => {
 'use strict';
 const $ = s => document.querySelector(s);
-const APP_VERSION = '717acdc';
+const APP_VERSION = 'a7b5fe5';
 const KEY_FRAMES = 'stopmotion.frames.v1';
 const KEY_SETTINGS = 'stopmotion.settings.v1';
 const MAX_FRAMES = 1000;    // hard cap on the number of frames (images)
@@ -865,9 +870,31 @@ function flipCamera() {
 }
 $('#flip-cam').addEventListener('click', flipCamera);
 
+/* ---------- update check ----------
+   deploy.sh writes version.json with the deployed commit on every deploy.
+   Stale tabs (kids leave the editor open for days) poll it and show a
+   "reload to update" button when the live version differs from theirs. */
+async function checkForUpdate() {
+  if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') return; // dev server
+  try {
+    const res = await fetch('/version.json', { cache: 'no-store' });
+    if (!res.ok) return;
+    const v = await res.json();
+    if (v && v.version && v.version !== APP_VERSION) {
+      const btn = $('#update-notice');
+      btn.hidden = false;
+      btn.title = 'Version ' + v.version + ' is live (you have ' + APP_VERSION + ') — click to reload and get it. Your frames are saved and will still be here.';
+    }
+  } catch (e) { /* offline — try again next round */ }
+}
+$('#update-notice').addEventListener('click', () => location.reload());
+setInterval(checkForUpdate, 5 * 60 * 1000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkForUpdate(); });
+
 /* ---------- init ---------- */
 (async () => {
   await loadState();   // IndexedDB is async — wait before first render
+  checkForUpdate();
   ghostToggle.checked = settings.ghost;
   loopToggle.checked = settings.loop !== false;
   $('#app-version').textContent = APP_VERSION;
