@@ -12,9 +12,9 @@
  * storage (the code doubles as the R2 key, projects/{code}.zip).
  */
 const KEY_PREFIX = 'projects/';
-const MAX_UPLOAD = 50 * 1024 * 1024; // 50 MB per project
+const MAX_UPLOAD = 100 * 1024 * 1024; // 100 MB per project (Workers' request-body ceiling)
 const CODE_LEN = 5;
-const MAX_FRAMES = 500; // hard cap: number of frames (images) per project
+const MAX_FRAMES = 1000; // hard cap: number of frames (images) per project
 const MAX_SOUNDS = 50;  // hard cap: number of frames carrying a sound
 // Admin credentials ("login:password"), checked against the x-admin-auth
 // header. Keep in sync with public/admin.html.

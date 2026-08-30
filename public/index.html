@@ -294,7 +294,7 @@ const $ = s => document.querySelector(s);
 const APP_VERSION = '717acdc';
 const KEY_FRAMES = 'stopmotion.frames.v1';
 const KEY_SETTINGS = 'stopmotion.settings.v1';
-const MAX_FRAMES = 500;     // hard cap on the number of frames (images)
+const MAX_FRAMES = 1000;    // hard cap on the number of frames (images)
 const MAX_SOUNDS = 50;      // hard cap on the number of frames that carry a sound
 const MAX_SOUND_MS = 10000; // sound recordings auto-stop at 10 s
 /* Title cards (silent-film "sign" frames): black background, centered text. */
@@ -356,30 +356,93 @@ function setStatus(msg, isError = false) {
   statusEl.classList.toggle('error', !!isError);
 }
 
-/* ---------- persistence (localStorage) ---------- */
+/* ---------- persistence (IndexedDB) ----------
+   localStorage's ~5 MB quota capped projects at roughly 110 frames, far below
+   MAX_FRAMES. IndexedDB has no such practical limit; old localStorage data is
+   migrated on first load, and localStorage remains the fallback when IndexedDB
+   is unavailable (e.g. some private-browsing modes). */
+let db = null;
+function openDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('stopmotion', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('kv');
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+function dbGet(key) {
+  return new Promise((resolve, reject) => {
+    const req = db.transaction('kv').objectStore('kv').get(key);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+function dbPut(key, value) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('kv', 'readwrite');
+    tx.objectStore('kv').put(value, key);
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+}
+/* persist() stays synchronous for its callers; writes are coalesced so a slow
+   IndexedDB write in flight never overlaps the next one. */
+let persistBusy = false, persistDirty = false;
 function persist() {
+  persistDirty = true;
+  drainPersist();
+  updateStorageInfo();
+}
+async function drainPersist() {
+  if (persistBusy) return;
+  persistBusy = true;
   try {
-    localStorage.setItem(KEY_FRAMES, JSON.stringify(frames));
-    localStorage.setItem(KEY_SETTINGS, JSON.stringify(settings));
-    updateStorageInfo();
-    return true;
+    while (persistDirty) {
+      persistDirty = false;
+      if (db) {
+        await dbPut(KEY_FRAMES, frames);
+        await dbPut(KEY_SETTINGS, settings);
+      } else {
+        localStorage.setItem(KEY_FRAMES, JSON.stringify(frames));
+        localStorage.setItem(KEY_SETTINGS, JSON.stringify(settings));
+      }
+    }
   } catch (e) {
-    setStatus('Could not save to local storage (quota exceeded?). Delete some frames or use a lower resolution.', true);
-    return false;
+    setStatus('Could not save your work locally (storage error). Your frames are still in memory — download the project to keep them safe.', true);
+  } finally {
+    persistBusy = false;
   }
 }
-function loadState() {
+async function loadState() {
+  try { db = await openDb(); } catch (e) { db = null; }
+  let f = null, s = null;
   try {
-    const f = JSON.parse(localStorage.getItem(KEY_FRAMES));
-    if (Array.isArray(f)) frames = f.filter(x => x && (typeof x.url === 'string' || x.type === 'title'));
-    const s = JSON.parse(localStorage.getItem(KEY_SETTINGS));
-    if (s) settings = Object.assign(settings, s);
-  } catch (e) { /* first run */ }
+    if (db) { f = await dbGet(KEY_FRAMES); s = await dbGet(KEY_SETTINGS); }
+  } catch (e) { /* fall through to localStorage */ }
+  let migrate = false;
+  if (!Array.isArray(f)) {
+    try {
+      f = JSON.parse(localStorage.getItem(KEY_FRAMES));
+      migrate = Array.isArray(f) && !!db;
+      if (!s) s = JSON.parse(localStorage.getItem(KEY_SETTINGS));
+    } catch (e) { /* first run */ }
+  }
+  if (Array.isArray(f)) frames = f.filter(x => x && (typeof x.url === 'string' || x.type === 'title'));
+  if (s) settings = Object.assign(settings, s);
+  if (migrate) {
+    try {
+      await dbPut(KEY_FRAMES, frames);
+      await dbPut(KEY_SETTINGS, settings);
+      localStorage.removeItem(KEY_FRAMES);
+      localStorage.removeItem(KEY_SETTINGS);
+    } catch (e) { /* keep the localStorage copy */ }
+  }
 }
 function updateStorageInfo() {
   try {
-    $('#storage-info').textContent = formatBytes(new Blob([localStorage.getItem(KEY_FRAMES) || '']).size) + ' in local storage';
-    const bytes = new Blob([JSON.stringify(frames)]).size;
+    let bytes = 0;   // data URLs are ASCII, so string length ≈ bytes
+    for (const f of frames) bytes += (f.url ? f.url.length : 0) + (f.sound ? f.sound.length : 0);
+    $('#storage-info').textContent = formatBytes(bytes) + ' stored locally';
     $('#frame-meta').textContent = frames.length ? formatBytes(bytes) : '';
   } catch (e) { /* ignore */ }
 }
@@ -496,7 +559,7 @@ function capture() {
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
   c.getContext('2d').drawImage(video, 0, 0, w, h);
-  const f = { id: uid(), url: c.toDataURL('image/jpeg', 0.75), createdAt: new Date().toISOString() };
+  const f = { id: uid(), url: c.toDataURL('image/jpeg', 0.6), createdAt: new Date().toISOString() };
   const ci = cursorId ? frames.findIndex(x => x.id === cursorId) : -1;
   if (ci >= 0) frames.splice(ci + 1, 0, f); else frames.push(f);
   cursorId = f.id;
@@ -803,17 +866,19 @@ function flipCamera() {
 $('#flip-cam').addEventListener('click', flipCamera);
 
 /* ---------- init ---------- */
-loadState();
-ghostToggle.checked = settings.ghost;
-loopToggle.checked = settings.loop !== false;
-$('#app-version').textContent = APP_VERSION;
-renderFrames(); updateGhost(); startCamera();
-/* Forking: /?fork=qzmnx loads a shared work into the editor */
-const forkCode = new URLSearchParams(location.search).get('fork');
-if (forkCode) {
-  history.replaceState(null, '', location.pathname);
-  loadFork(forkCode);
-}
+(async () => {
+  await loadState();   // IndexedDB is async — wait before first render
+  ghostToggle.checked = settings.ghost;
+  loopToggle.checked = settings.loop !== false;
+  $('#app-version').textContent = APP_VERSION;
+  renderFrames(); updateGhost(); startCamera();
+  /* Forking: /?fork=qzmnx loads a shared work into the editor */
+  const forkCode = new URLSearchParams(location.search).get('fork');
+  if (forkCode) {
+    history.replaceState(null, '', location.pathname);
+    loadFork(forkCode);
+  }
+})();
 
 /* ---------- per-frame sound ---------- */
 function makeSndBtn(act, text, title) {
