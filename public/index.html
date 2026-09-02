@@ -19,6 +19,11 @@
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
+  /* On phones, 100% can disagree with the area the browser's collapsing
+     toolbars actually leave visible, hiding the reel behind the toolbar
+     (body clips overflow, so you can't scroll it into view). dvh tracks
+     the real visible viewport. */
+  @supports (height: 100dvh) { body { height: 100dvh; } }
   body {
     margin: 0;
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
